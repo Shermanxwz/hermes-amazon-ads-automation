@@ -3,21 +3,75 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Hermes Amazon Ads 主控台</title>
+  <title>Hermes Amazon Ads</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="shell">
-    <header><div><h1>Hermes · Amazon Ads</h1><p>主控、Worker 与每日操作的透明控制面</p></div><span id="live" class="badge">连接中</span></header>
-    <section id="login" class="card login"><h2>登录</h2><form id="loginForm"><input id="password" type="password" autocomplete="current-password" placeholder="控制台密码" required><button>进入</button></form><p id="loginError"></p></section>
-    <div id="app" hidden>
-      <section class="grid metrics" id="metrics"></section>
-      <section class="card controls"><div><h2>运行模式</h2><p>日志与操作记录只读；这里仅控制自动执行开关和硬性边界。</p></div><div class="control-row"><select id="mode"><option value="autopilot">AUTOPILOT</option><option value="observe">OBSERVE</option><option value="paused">PAUSED</option></select><label><input id="execution" type="checkbox">允许 Worker 写操作</label><button id="saveSettings">保存</button><button id="logout" class="ghost">退出</button></div></section>
-      <section class="columns"><div class="card"><h2>任务</h2><div id="tasks"></div></div><div class="card"><h2>Workers</h2><div id="workers"></div></div></section>
-      <section class="card"><h2>最近操作</h2><div class="table-wrap"><table><thead><tr><th>时间</th><th>角色</th><th>操作</th><th>工具</th><th>结果</th><th>任务</th></tr></thead><tbody id="actions"></tbody></table></div></section>
-      <section class="card"><h2>事件流</h2><div id="events" class="timeline"></div></section>
-    </div>
+  <main>
+    <section id="login" class="card login">
+      <h1>Hermes Amazon Ads</h1>
+      <p>确定性策略 · Executor 执行 · 独立验证 · 全程可追溯</p>
+      <form id="login-form"><input id="password" type="password" autocomplete="current-password" placeholder="控制台密码" required><button>登录</button></form>
+      <div id="login-error" class="error"></div>
+    </section>
+
+    <section id="app" hidden>
+      <header>
+        <div><h1>Amazon Ads 主控</h1><p id="generated">—</p></div>
+        <div class="controls">
+          <button data-mode="autopilot">自动运营</button>
+          <button data-mode="observe">仅观察</button>
+          <button data-mode="paused">暂停</button>
+          <button id="refresh">刷新</button>
+          <button id="logout" class="ghost">退出</button>
+        </div>
+      </header>
+
+      <section class="status-strip">
+        <span id="mode-pill">—</span>
+        <span id="execution-pill">—</span>
+        <span id="catalog-pill">—</span>
+        <span id="alerts-pill">—</span>
+      </section>
+
+      <section id="kpis" class="kpis"></section>
+
+      <nav id="tabs">
+        <button class="active" data-tab="overview">总览</button>
+        <button data-tab="decisions">决策</button>
+        <button data-tab="changes">变更与验证</button>
+        <button data-tab="alerts">异常</button>
+        <button data-tab="profiles">Profiles / MCP</button>
+      </nav>
+
+      <section id="overview" class="tab active">
+        <div class="grid two">
+          <article class="card"><h2>最近周期</h2><div id="cycles"></div></article>
+          <article class="card"><h2>任务与 Worker</h2><div id="tasks"></div><div id="workers"></div></article>
+        </div>
+        <article class="card"><h2>系统事件</h2><div id="events"></div></article>
+      </section>
+
+      <section id="decisions" class="tab"><article class="card"><h2>确定性策略决策</h2><div id="decision-list"></div></article></section>
+      <section id="changes" class="tab"><article class="card"><h2>工具调用与结构化结果</h2><div id="actions"></div></article><article class="card"><h2>独立 Verifier 读回</h2><div id="verifications"></div></article></section>
+      <section id="alerts" class="tab"><article class="card"><h2>需要关注</h2><div id="alert-list"></div></article></section>
+      <section id="profiles" class="tab">
+        <div class="grid two">
+          <article class="card"><h2>广告 Profiles</h2><div id="profile-list"></div></article>
+          <article class="card"><h2>核心策略</h2>
+            <form id="strategy-form" class="strategy-form">
+              <label>目标 ACOS %<input id="target-acos" type="number" min="1" step="0.1"></label>
+              <label>最高 ACOS %<input id="max-acos" type="number" min="1" step="0.1"></label>
+              <label>单次竞价最大变化 %<input id="max-bid-change" type="number" min="1" max="100"></label>
+              <label>单次预算最大变化 %<input id="max-budget-change" type="number" min="1" max="100"></label>
+              <button>保存策略</button><span id="strategy-message"></span>
+            </form>
+          </article>
+        </div>
+        <article class="card"><h2>Amazon Ads MCP 工具目录</h2><div id="catalog"></div><div id="catalog-tools"></div></article>
+      </section>
+    </section>
   </main>
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>

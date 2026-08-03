@@ -2,30 +2,24 @@
 
 ## Secrets
 
-Never commit or paste into conversations: Amazon client secrets, OAuth access/refresh tokens, authorization codes/state, New-API keys, GitHub tokens, control-plane password hashes tied to a real password, browser profiles/cookies, or Hermes token/session databases.
-
-Store runtime values in `/etc/hermes-amazon-ads-control.env` with mode `0600`, owned by the service user or root. The shared agent token should be at least 32 random characters and is only sent over loopback.
+Never commit Amazon client secrets, OAuth tokens, Hermes auth/session databases, control passwords, agent tokens, browser cookies or raw customer/order payloads. Use a root-readable environment file with mode `0600`. OAuth tokens remain managed by Hermes.
 
 ## Network
 
-- Bind the control plane to `127.0.0.1`.
-- Publish only through an HTTPS reverse proxy.
-- Do not expose SQLite, browser debugging, xrdp/VNC, or port 8790 directly.
-- The browser API uses password login, HttpOnly SameSite=Strict session cookie, CSRF token, Origin check, bounded sessions, and no-store headers.
-- Agent endpoints use a separate bearer token and should stay loopback-only.
+The service defaults to loopback and refuses remote bind unless explicitly overridden. Publish through HTTPS Nginx/Caddy. Do not expose SQLite, 8790, browser debugging or Seller Central cookies.
 
-## LLM/tool boundary
+## Hard policy
 
-The plugin blocks model-originated Amazon Ads writes from Main and unbound sessions. It does not protect against root, direct database edits, a compromised Hermes/control-plane process, a stolen agent token, or side effects caused by other allowed tools such as shell commands. Keep Hermes terminal approvals/sandbox rules appropriate for the VPS.
+Main and Verifier cannot write. Executor writes require a bound task, deterministic decision, exact live MCP catalog entry, non-drifted Schema, successful independent JSON Schema validation, atomic reservation, one-entity batch, limits and independent verification. Delete/archive and account/billing administration are permanently blocked.
 
-## Seller Central
+## Web
 
-The project does not automate authentication challenges, CAPTCHA/2FA, banking, tax, account-health appeals, permissions, or identity verification. Use the fixed VPS browser profile manually for those flows.
+PBKDF2 password hashing, constant-time token comparison, bounded thread-safe sessions, login rate limiting, HttpOnly SameSite cookies, CSRF, Origin checking, CSP, no-store and frame denial are enabled.
+
+## Scope
+
+This project controls model-originated Amazon Ads MCP calls. It does not defend against root compromise, a compromised Hermes process, a stolen agent token or malicious code installed on the VPS. Seller Central login remains separate and manual.
 
 ## Incident response
 
-1. Set mode to `paused` or disable `execution_enabled`.
-2. Revoke/rotate the affected token or OAuth credential.
-3. Preserve the SQLite DB and Hermes logs.
-4. Review blocked/allowed actions and task bindings.
-5. Read back Amazon Ads objects before reverting; do not blindly replay inverse actions.
+Pause the service, disable the plugin, revoke affected Amazon/Hermes credentials, preserve the SQLite audit database, inspect alerts/actions/verifications, rotate tokens, re-sync the MCP catalog in `OBSERVE`, then resume only after Test Account verification.

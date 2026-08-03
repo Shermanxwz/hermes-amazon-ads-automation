@@ -1,16 +1,19 @@
 name: amazon-ads-control
-version: 1.0.0
-description: Observable main/worker policy, audit trail, and guardrails for Hermes Amazon Ads automation
+version: 2.0.0
+description: Deterministic, observable and independently verified Amazon Ads autopilot for Hermes
 requires_env:
   - name: ADS_CONTROL_AGENT_TOKEN
     description: Shared loopback token for the Amazon Ads control plane
     secret: true
 provides_tools:
+  - ads_control_sync_catalog
+  - ads_control_plan_cycle
   - ads_control_create_task
   - ads_control_status
-  - ads_control_task
   - ads_control_record_note
-  - ads_control_complete_task
+  - ads_control_verify_decision
+  - ads_control_finalize_task
+  - ads_control_ingest_stream_events
 provides_hooks:
   - pre_llm_call
   - pre_tool_call

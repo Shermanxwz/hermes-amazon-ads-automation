@@ -1,65 +1,80 @@
-CREATE_TASK = {
-    "name": "ads_control_create_task",
-    "description": "Create an observable Amazon Ads task before delegating execution to a Hermes worker. Returns a task ID that must be included in the worker goal as [ads-task:<id>].",
+SYNC_CATALOG = {
+    "name": "ads_control_sync_catalog",
+    "description": "Synchronize the exact live Amazon Ads MCP tool names and JSON schemas from the Hermes registry into the control plane.",
+    "parameters": {"type": "object", "properties": {}},
+}
+PLAN_CYCLE = {
+    "name": "ads_control_plan_cycle",
+    "description": "Run the deterministic Amazon Ads strategy engine on a normalized mature data snapshot. Returns a cycle and explainable decisions; it does not execute writes.",
     "parameters": {
         "type": "object",
         "properties": {
-            "title": {"type": "string"},
-            "kind": {"type": "string", "enum": ["audit", "optimization", "recovery", "report", "maintenance"]},
-            "objective": {"type": "string"},
-            "write_allowed": {"type": "boolean"},
-            "constraints": {"type": "object"},
-            "evidence": {"type": "object"},
-            "expected_actions": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "idempotency_key": {"type": "string"},
-                        "tool_contains": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
-                        "entity_id": {"type": "string"},
-                        "field": {"type": "string"},
-                        "before": {},
-                        "after": {},
-                        "reason": {"type": "string"}
-                    },
-                    "required": ["idempotency_key", "tool_contains", "reason"]
-                }
+            "snapshot": {
+                "type": "object",
+                "description": "Normalized snapshot containing profile, source, window, account, campaigns, targets, search_terms, placements, budget_usage and recommendations.",
             },
+            "policy": {"type": "object", "description": "Optional per-cycle strategy overrides."},
         },
-        "required": ["title", "kind", "objective"],
+        "required": ["snapshot"],
+    },
+}
+CREATE_TASK = {
+    "name": "ads_control_create_task",
+    "description": "Create an execution task from a deterministic cycle. Returns a task ID for [ads-task:<id>] markers.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "cycle_id": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+        },
+        "required": ["cycle_id"],
     },
 }
 STATUS = {
     "name": "ads_control_status",
-    "description": "Read the current control-plane role, mode, task, and guardrails for this Hermes session.",
+    "description": "Read role, mode, catalog health, bound task and deterministic decisions for this Hermes session.",
     "parameters": {"type": "object", "properties": {}},
-}
-TASK = {
-    "name": "ads_control_task",
-    "description": "Read one task from the Amazon Ads control plane.",
-    "parameters": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]},
 }
 NOTE = {
     "name": "ads_control_record_note",
-    "description": "Record a concise decision, anomaly, or verification note in the immutable daily activity timeline.",
-    "parameters": {
-        "type": "object",
-        "properties": {"message": {"type": "string"}, "task_id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error"]}},
-        "required": ["message"],
-    },
-}
-
-COMPLETE = {
-    "name": "ads_control_complete_task",
-    "description": "Complete the currently bound Worker task after read-back verification. Workers must call this before returning their final summary.",
+    "description": "Record a concise operator-visible decision or anomaly in the audit timeline.",
     "parameters": {
         "type": "object",
         "properties": {
-            "status": {"type": "string", "enum": ["completed", "failed"]},
-            "summary": {"type": "string"},
-            "verification": {"type": "object"}
+            "message": {"type": "string"}, "task_id": {"type": "string"},
+            "level": {"type": "string", "enum": ["info", "warning", "error"]},
         },
-        "required": ["status", "summary", "verification"]
-    }
+        "required": ["message"],
+    },
+}
+VERIFY = {
+    "name": "ads_control_verify_decision",
+    "description": "Verifier-only: compare a fresh independent Amazon read with the deterministic expected state for one executed decision.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "decision_id": {"type": "string"},
+            "actual": {"type": "object"},
+            "message": {"type": "string"},
+        },
+        "required": ["decision_id", "actual"],
+    },
+}
+FINALIZE = {
+    "name": "ads_control_finalize_task",
+    "description": "Finalize a task only after every decision is independently verified or recorded as an issue.",
+    "parameters": {
+        "type": "object",
+        "properties": {"task_id": {"type": "string"}, "summary": {"type": "string"}},
+        "required": ["task_id", "summary"],
+    },
+}
+STREAM = {
+    "name": "ads_control_ingest_stream_events",
+    "description": "Ingest deduplicated Amazon Marketing Stream event envelopes into the audit/data layer.",
+    "parameters": {
+        "type": "object",
+        "properties": {"events": {"type": "array", "items": {"type": "object"}}},
+        "required": ["events"],
+    },
 }

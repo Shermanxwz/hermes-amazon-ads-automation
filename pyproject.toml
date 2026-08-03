@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-amazon-ads-control"
-version = "1.0.0"
-description = "Observable Hermes control plane for autonomous Amazon Ads main/worker operation"
+version = "2.0.0"
+description = "Deterministic Hermes-native Amazon Ads autopilot with executor-only writes and independent verification"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "Shermanxwz"}]

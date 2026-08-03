@@ -3,6 +3,7 @@
 *.env
 *.env.*
 !config/secrets.env.example
+!deploy/*.env.example
 mcp-tokens/
 auth.json
 state.db
@@ -15,9 +16,9 @@ backups/
 *.bak
 *.pyc
 __pycache__/
-.DS_Store
-.venv/
+.pytest_cache/
+.venv*/
+dist/
 build/
 *.egg-info/
-official/*.local.json
-official/*.ci.json
+.DS_Store

@@ -1,33 +1,27 @@
 {
   "package": "hermes-amazon-ads-automation",
-  "version": "1.0.0",
-  "purpose": "Observable Hermes-native Amazon Ads autopilot with hard main/worker separation",
+  "version": "2.0.0",
+  "scope": "Amazon advertising operations only",
   "runtime": {
     "control_plane": "Python 3.11+ standard library",
     "database": "SQLite WAL",
-    "hermes_extension": "directory plugin + namespaced skill",
-    "web": "responsive read-only audit dashboard",
+    "hermes_contract": "v2026.7.7.2 / hermes-agent 0.18.2",
+    "amazon_capability": "official Amazon Ads MCP plus public Advanced Tools contracts",
+    "web": "responsive operational dashboard",
     "target_host": "2C2G Linux VPS"
   },
   "capabilities": [
-    "Hermes pre/post tool policy hooks",
-    "real subagent-to-task binding",
-    "planned write matching and idempotency",
-    "bid/budget/action guardrails",
-    "autopilot, observe, and paused modes",
-    "redacted daily task/action/event history",
-    "systemd and HTTPS reverse-proxy deployment examples"
+    "exact live Hermes MCP tool and JSON Schema discovery",
+    "deterministic sponsored-ads strategy engine",
+    "atomic executor reservations and cross-cycle cooldown",
+    "independent read-only verifier",
+    "structured partial/pending/failure outcome handling",
+    "Marketing Stream dedupe and operational alerts",
+    "immutable safety gates and transparent audit history"
   ],
-  "tests": {
-    "unit_and_integration": 26,
-    "process_e2e": true,
-    "install_smoke": true,
-    "secret_scan": true
-  },
-  "excluded": [
-    "Amazon credentials and OAuth tokens",
-    "Hermes auth/session databases",
-    "raw customer/order/report payloads",
-    "browser cookies and Seller Central credentials"
+  "production_acceptance_required": [
+    "owner Amazon Ads OAuth",
+    "visible profiles and permissions",
+    "Amazon Ads Test Account or controlled real-account write verification"
   ]
 }

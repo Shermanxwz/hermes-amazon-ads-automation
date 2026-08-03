@@ -5,30 +5,30 @@ from . import client
 
 
 def _session(kwargs):
-    return kwargs.get("session_id") or kwargs.get("task_id") or ""
+    return kwargs.get("session_id") or kwargs.get("task_id") or kwargs.get("turn_id") or ""
 
 
-def create_task(title, kind, objective, write_allowed=None, constraints=None, evidence=None, expected_actions=None, **kwargs):
-    payload = {
-        "title": title, "kind": kind, "objective": objective,
-        "write_allowed": kind in {"optimization", "recovery"} if write_allowed is None else write_allowed,
-        "constraints": constraints or {}, "evidence": evidence or {}, "expected_actions": expected_actions or [],
-        "parent_session_id": _session(kwargs), "actor": "hermes-main",
-    }
-    return json.dumps(client.request("POST", "/api/agent/tasks", payload), ensure_ascii=False)
+def sync_catalog(**kwargs):
+    # Actual registry collection lives in the plugin module so hooks and this tool share a cache.
+    from . import sync_live_catalog
+    return json.dumps(sync_live_catalog(force=True), ensure_ascii=False)
+
+
+def plan_cycle(snapshot, policy=None, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/cycles/plan", {
+        "snapshot": snapshot, "policy": policy or {}, "actor": "hermes-main",
+        "parent_session_id": _session(kwargs),
+    }, timeout=30), ensure_ascii=False)
+
+
+def create_task(cycle_id, limit=25, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/tasks", {
+        "cycle_id": cycle_id, "limit": limit, "parent_session_id": _session(kwargs), "actor": "hermes-main",
+    }), ensure_ascii=False)
 
 
 def status(**kwargs):
     return json.dumps(client.context(_session(kwargs)), ensure_ascii=False)
-
-
-def task(task_id, **kwargs):
-    # Dashboard API is browser-only; context includes the currently bound task. This method
-    # intentionally remains minimal and asks the control plane to emit a lookup note.
-    current = client.context(_session(kwargs))
-    if current.get("task", {}).get("id") == task_id:
-        return json.dumps(current["task"], ensure_ascii=False)
-    return json.dumps({"task_id": task_id, "message": "Task is not bound to this session; use the dashboard or delegate it with the task marker."}, ensure_ascii=False)
 
 
 def record_note(message, task_id=None, level="info", **kwargs):
@@ -38,11 +38,18 @@ def record_note(message, task_id=None, level="info", **kwargs):
     }), ensure_ascii=False)
 
 
-def complete_task(status, summary, verification, **kwargs):
-    session_id = _session(kwargs)
-    return json.dumps(client.request("POST", "/api/agent/worker-stop", {
-        "worker_session_id": session_id,
-        "status": status,
-        "summary": summary,
-        "verification": verification,
+def verify_decision(decision_id, actual, message="", **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/verify", {
+        "decision_id": decision_id, "actual": actual, "message": message,
+        "session_id": _session(kwargs),
     }), ensure_ascii=False)
+
+
+def finalize_task(task_id, summary, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/task-finalize", {
+        "task_id": task_id, "summary": summary, "actor": "hermes-main",
+    }), ensure_ascii=False)
+
+
+def ingest_stream_events(events, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/stream-events", {"events": events}, timeout=15), ensure_ascii=False)

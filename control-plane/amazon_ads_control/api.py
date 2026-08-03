@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -12,10 +11,10 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import Settings
 from .db import Store
-from .security import SessionStore, constant_token_match, verify_password
+from .security import LoginRateLimiter, SessionStore, constant_token_match, verify_password
 from .service import ControlService
 
-MAX_BODY = 1_048_576
+MAX_BODY = 8 * 1024 * 1024
 
 
 @dataclass
@@ -24,28 +23,33 @@ class App:
     store: Store
     service: ControlService
     sessions: SessionStore
+    login_limiter: LoginRateLimiter
 
 
 def _json_bytes(data: Any) -> bytes:
-    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "HermesAdsControl/1.0"
+    server_version = "HermesAdsControl/2.0"
     app: App
 
     def log_message(self, fmt: str, *args: Any) -> None:
         return
+
+    def _security_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:")
 
     def _respond(self, status: int, data: Any, headers: dict[str, str] | None = None) -> None:
         body = _json_bytes(data)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'")
+        self._security_headers()
         for key, value in (headers or {}).items():
             self.send_header(key, value)
         self.end_headers()
@@ -65,10 +69,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", f"{content_type}; charset=utf-8" if content_type.startswith(("text/", "application/javascript")) else content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'")
+        self._security_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -115,47 +116,69 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    @staticmethod
+    def _limit(query: dict[str, list[str]], default: int, maximum: int = 1000) -> int:
+        try:
+            return max(1, min(maximum, int(query.get("limit", [default])[0])))
+        except (TypeError, ValueError):
+            return default
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path, query = parsed.path, parse_qs(parsed.query)
-        if path == "/health/live":
-            self._respond(200, {"ok": True})
-        elif path == "/health/ready":
-            try:
-                self.app.store.get_settings()
-                self._respond(200, {"ok": True, "database": "ready"})
-            except Exception as exc:
-                self._respond(503, {"ok": False, "error": str(exc)})
-        elif path == "/api/session":
-            session = self._browser_session()
-            self._respond(200, {"authenticated": bool(session), "csrf": session.csrf if session else None})
-        elif path == "/api/dashboard":
-            if self._require_browser():
+        try:
+            if path == "/health/live":
+                self._respond(200, {"ok": True})
+            elif path == "/health/ready":
+                dashboard = self.app.store.dashboard()
+                self._respond(200, {"ok": True, "database": "ready", "mode": dashboard["settings"].get("mode"), "catalog": dashboard["catalog"]})
+            elif path == "/api/session":
+                session = self._browser_session()
+                self._respond(200, {"authenticated": bool(session), "csrf": session.csrf if session else None})
+            elif path == "/api/agent/context":
+                if self._require_agent():
+                    self._respond(200, self.app.service.context(query.get("session_id", [None])[0]))
+            elif path == "/":
+                self._static("index.html")
+            elif path.startswith("/static/"):
+                self._static(path.removeprefix("/static/"))
+            elif not self._require_browser():
+                return
+            elif path == "/api/dashboard":
                 self._respond(200, self.app.store.dashboard())
-        elif path == "/api/tasks":
-            if self._require_browser():
-                self._respond(200, {"tasks": self.app.store.list_tasks(int(query.get("limit", [100])[0]))})
-        elif path == "/api/actions":
-            if self._require_browser():
-                self._respond(200, {"actions": self.app.store.list_actions(int(query.get("limit", [200])[0]), query.get("task_id", [None])[0])})
-        elif path == "/api/events":
-            if self._require_browser():
-                self._respond(200, {"events": self.app.store.list_events(int(query.get("limit", [200])[0]))})
-        elif path == "/api/workers":
-            if self._require_browser():
-                self._respond(200, {"workers": self.app.store.list_workers()})
-        elif path == "/api/settings":
-            if self._require_browser():
+            elif path == "/api/cycles":
+                self._respond(200, {"cycles": self.app.store.list_cycles(self._limit(query, 50), query.get("profile_id", [None])[0])})
+            elif path == "/api/decisions":
+                self._respond(200, {"decisions": self.app.store.list_decisions(
+                    cycle_id=query.get("cycle_id", [None])[0], task_id=query.get("task_id", [None])[0],
+                    status=query.get("status", [None])[0], limit=self._limit(query, 200),
+                )})
+            elif path == "/api/tasks":
+                self._respond(200, {"tasks": self.app.store.list_tasks(self._limit(query, 100), query.get("status", [None])[0])})
+            elif path == "/api/actions":
+                self._respond(200, {"actions": self.app.store.list_actions(self._limit(query, 200), query.get("task_id", [None])[0])})
+            elif path == "/api/verifications":
+                self._respond(200, {"verifications": self.app.store.list_verifications(
+                    self._limit(query, 200), query.get("task_id", [None])[0], query.get("decision_id", [None])[0]
+                )})
+            elif path == "/api/events":
+                self._respond(200, {"events": self.app.store.list_events(self._limit(query, 200))})
+            elif path == "/api/alerts":
+                status = query.get("status", ["open"])[0]
+                self._respond(200, {"alerts": self.app.store.list_alerts(self._limit(query, 100), None if status == "all" else status)})
+            elif path == "/api/workers":
+                self._respond(200, {"workers": self.app.store.list_workers(self._limit(query, 100))})
+            elif path == "/api/profiles":
+                self._respond(200, {"profiles": self.app.store.list_profiles()})
+            elif path == "/api/catalog":
+                self._respond(200, {"tools": self.app.store.list_tools(self._limit(query, 500, 2000))})
+            elif path == "/api/settings":
                 self._respond(200, self.app.store.get_settings())
-        elif path == "/api/agent/context":
-            if self._require_agent():
-                self._respond(200, self.app.service.context(query.get("session_id", [None])[0]))
-        elif path == "/":
-            self._static("index.html")
-        elif path.startswith("/static/"):
-            self._static(path.removeprefix("/static/"))
-        else:
-            self._respond(404, {"error": "not_found"})
+            else:
+                self._respond(404, {"error": "not_found"})
+        except Exception as exc:
+            self.app.store.event("error", "api.get_error", "controller", None, str(exc), {"path": path})
+            self._respond(500, {"error": "internal_error"})
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
@@ -166,53 +189,66 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             if path == "/api/login":
-                if not verify_password(str(data.get("password", "")), self.app.settings.control_password_hash):
-                    self.app.store.event("warning", "auth.failed", "browser", None, "Dashboard login failed", {})
-                    self._respond(401, {"error": "invalid_credentials"})
+                login_key = "dashboard"
+                permitted, retry_after = self.app.login_limiter.allowed(login_key)
+                if not permitted:
+                    self._respond(429, {"error": "login_rate_limited", "retry_after": retry_after}, {"Retry-After": str(retry_after)})
                     return
+                if not verify_password(str(data.get("password", "")), self.app.settings.control_password_hash):
+                    permitted, retry_after = self.app.login_limiter.failure(login_key)
+                    self.app.store.event("warning", "auth.failed", "browser", None, "Dashboard login failed", {"rate_limited": not permitted})
+                    headers = {"Retry-After": str(retry_after)} if not permitted else None
+                    self._respond(429 if not permitted else 401, {"error": "login_rate_limited" if not permitted else "invalid_credentials", "retry_after": retry_after}, headers)
+                    return
+                self.app.login_limiter.success(login_key)
                 sid, csrf = self.app.sessions.create()
                 secure = "; Secure" if self.app.settings.public_origin.startswith("https://") else ""
                 headers = {"Set-Cookie": f"ads_control_session={sid}; HttpOnly; SameSite=Strict{secure}; Path=/; Max-Age={self.app.settings.session_ttl_seconds}"}
                 self._respond(200, {"ok": True, "csrf": csrf}, headers)
-            elif path == "/api/logout":
+                return
+            if path == "/api/logout":
                 if self._require_browser(mutate=True):
                     self.app.sessions.revoke(self._cookie_sid())
                     self._respond(200, {"ok": True}, {"Set-Cookie": "ads_control_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
-            elif path == "/api/agent/tasks":
-                if self._require_agent():
-                    self._respond(201, self.app.service.create_task(data, str(data.get("actor", "hermes-main"))))
-            elif path == "/api/agent/worker-bind":
-                if self._require_agent():
-                    self._respond(200, self.app.service.bind_worker(data))
-            elif path == "/api/agent/tool-check":
-                if self._require_agent():
-                    result = self.app.service.authorize_tool(data)
-                    self._respond(200 if result["allowed"] else 403, result)
-            elif path == "/api/agent/tool-result":
-                if self._require_agent():
-                    self._respond(200, self.app.service.finish_tool(data))
+                return
+            if not self._require_agent():
+                return
+            routes = {
+                "/api/agent/catalog-sync": lambda: self.app.service.sync_catalog(data),
+                "/api/agent/cycles/plan": lambda: self.app.service.plan_cycle(data, str(data.get("actor") or "hermes-main")),
+                "/api/agent/tasks": lambda: self.app.service.create_task(data, str(data.get("actor") or "hermes-main")),
+                "/api/agent/worker-bind": lambda: self.app.service.bind_worker(data),
+                "/api/agent/tool-check": lambda: self.app.service.authorize_tool(data),
+                "/api/agent/tool-result": lambda: self.app.service.finish_tool(data),
+                "/api/agent/verify": lambda: self.app.service.verify_decision(data),
+                "/api/agent/task-finalize": lambda: self.app.service.finalize_task(data, str(data.get("actor") or "hermes-main")),
+                "/api/agent/stream-events": lambda: self.app.service.ingest_stream(data),
+            }
+            if path in routes:
+                result = routes[path]()
+                if path == "/api/agent/tool-check" and not result.get("allowed", False):
+                    self._respond(403, result)
+                else:
+                    self._respond(201 if path in {"/api/agent/cycles/plan", "/api/agent/tasks"} else 200, result)
             elif path == "/api/agent/worker-stop":
-                if self._require_agent():
-                    self.app.store.finish_worker(
-                        str(data.get("worker_session_id", "")), str(data.get("status", "completed")),
-                        str(data.get("summary", "")), int(data.get("duration_ms") or 0),
-                        data.get("verification") if isinstance(data.get("verification"), dict) else {},
-                    )
-                    self._respond(200, {"ok": True})
+                self.app.store.finish_worker(
+                    str(data.get("worker_session_id") or ""), str(data.get("status") or "completed"),
+                    str(data.get("summary") or ""), int(data.get("duration_ms") or 0),
+                )
+                self._respond(200, {"ok": True})
             elif path == "/api/agent/events":
-                if self._require_agent():
-                    event_id = self.app.store.event(
-                        str(data.get("level", "info")), str(data.get("type", "agent.event")),
-                        str(data.get("actor", "hermes")), data.get("task_id"),
-                        str(data.get("message", "")), data.get("data") if isinstance(data.get("data"), dict) else {},
-                    )
-                    self._respond(201, {"id": event_id})
+                event_id = self.app.store.event(
+                    str(data.get("level") or "info"), str(data.get("type") or "agent.event"),
+                    str(data.get("actor") or "hermes"), data.get("task_id"), str(data.get("message") or ""),
+                    data.get("data") if isinstance(data.get("data"), dict) else {},
+                )
+                self._respond(201, {"id": event_id})
             else:
                 self._respond(404, {"error": "not_found"})
         except (ValueError, KeyError) as exc:
             self._respond(400, {"error": str(exc)})
         except Exception as exc:
-            self.app.store.event("error", "api.error", "controller", None, str(exc), {"path": path})
+            self.app.store.event("error", "api.post_error", "controller", None, str(exc), {"path": path})
             self._respond(500, {"error": "internal_error"})
 
     def do_PUT(self) -> None:
@@ -222,20 +258,31 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._respond(400, {"error": str(exc)})
             return
-        if path != "/api/settings":
-            self._respond(404, {"error": "not_found"})
-            return
         if not self._require_browser(mutate=True):
             return
         try:
-            self._respond(200, self.app.store.update_settings(data))
-        except ValueError as exc:
+            if path == "/api/settings":
+                self._respond(200, self.app.store.update_settings(data))
+            elif path.startswith("/api/catalog/") and path.endswith("/acknowledge"):
+                tool_name = path[len("/api/catalog/"):-len("/acknowledge")].strip("/")
+                self.app.store.acknowledge_tool_drift(tool_name)
+                self._respond(200, {"ok": True})
+            elif path.startswith("/api/profiles/"):
+                profile_id = path.removeprefix("/api/profiles/").strip("/")
+                current = self.app.store.get_profile(profile_id) or {"profile_id": profile_id}
+                current.update(data)
+                current["profile_id"] = profile_id
+                self._respond(200, self.app.store.upsert_profile(current))
+            else:
+                self._respond(404, {"error": "not_found"})
+        except (ValueError, KeyError) as exc:
             self._respond(400, {"error": str(exc)})
 
 
 def build_server(settings: Settings, store: Store | None = None) -> ThreadingHTTPServer:
     store = store or Store(settings.db_path)
     app = App(settings=settings, store=store, service=ControlService(store),
-              sessions=SessionStore(settings.session_ttl_seconds, settings.max_sessions))
+              sessions=SessionStore(settings.session_ttl_seconds, settings.max_sessions),
+              login_limiter=LoginRateLimiter())
     handler = type("ConfiguredHandler", (Handler,), {"app": app})
     return ThreadingHTTPServer((settings.host, settings.port), handler)

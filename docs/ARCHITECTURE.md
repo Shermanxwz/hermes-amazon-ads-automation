@@ -1,40 +1,37 @@
-# Architecture and trust boundary
+# Architecture
 
-## Why this is a Hermes plugin, not another agent framework
+## Trust model
 
-Hermes already supplies the conversation loop, cron, delegation, model/provider routing, MCP client, and session identity. The project therefore embeds at Hermes's supported extension points instead of reimplementing them:
+Amazon Ads MCP provides capabilities, not policy. Hermes Main collects and explains data. Only the deterministic engine creates executable decisions. A bound Executor performs one reserved decision; a different Verifier independently reads Amazon state before the control plane commits it.
 
-- `pre_llm_call`: inject compact current role/mode/task context.
-- `pre_tool_call`: synchronously authorize or block every Amazon Ads operation.
-- `post_tool_call`: record bounded/redacted result metadata.
-- `subagent_start`: bind a real Hermes child session to a control-plane task through `[ads-task:<id>]`.
-- `subagent_stop`: observe the worker lifecycle when Hermes supplies a child session identifier.
-- `ads_control_complete_task`: authoritative task close with structured read-back verification, because current Hermes `subagent_stop` payloads do not guarantee a child session ID.
-- bundled skill: defines the controller/worker operating procedure.
+## Components
 
-## Authority model
+- **Live MCP catalog**: exact Hermes registered name, native name, JSON Schema, semantic, family, risk, hash and drift state.
+- **Optimization engine**: attribution maturity, data freshness, KPI calculations, target/search-term/budget/placement/recommendation rules.
+- **Transaction boundary**: SQLite `BEGIN IMMEDIATE`, unique decision IDs, reservation token, TTL, cooldown, task/day limits.
+- **Outcome parser**: explicit success/failure/partial/pending/unknown; HTTP-like or arbitrary JSON is never assumed successful.
+- **Independent verification**: only a task-bound verifier can submit fresh actual state. Mismatch opens a critical alert.
+- **Web**: browser session, CSRF, Origin checks, login rate limiting, immutable safety settings, read-oriented operations dashboard.
 
-The LLM is not the authority for role claims. The control plane derives Worker status only from a server-side child-session binding created by the plugin's real `subagent_start` hook. Caller-supplied `role=worker` fields are ignored.
+## State machine
 
-A write is allowed only when all are true:
+```text
+planned -> reserved -> executed|pending|failed -> verified|mismatch
+```
 
-1. the tool is classified as an Amazon Ads write;
-2. system mode is `autopilot` and execution is enabled;
-3. the caller's Hermes session is currently bound to a task;
-4. the task is write-enabled and running;
-5. the requested change is within guardrails;
-6. task and daily action limits are not exhausted.
+A task cannot finalize while decisions are planned, reserved, executed or pending. Only all-verified tasks become `completed`; failures or mismatches become `completed_with_issues`.
 
-Unknown Amazon Ads operations fail closed. Non-Amazon tools remain Hermes's responsibility.
+## Data model
 
-## Main versus Worker
+- `profiles`: marketplace/currency and per-profile strategy overrides;
+- `cycles`: source, window, maturity/data quality, KPI and snapshot hash;
+- `metrics`: normalized account/campaign/target/search-term/placement rows;
+- `decisions`: rule, evidence, exact planned payload, reservation and result;
+- `tasks`, `workers`: Main/Executor/Verifier lifecycle;
+- `mcp_tools`: exact live MCP contract and drift state;
+- `actions`, `verifications`, `events`, `alerts`: immutable operational history;
+- `stream_events`: deduplicated Marketing Stream events.
 
-Main owns understanding and coordination. Main can query Ads, calculate metrics, create tasks, delegate, inspect results, and explain decisions. Main cannot call Ads writes.
+## Failure behavior
 
-Worker receives one bound task and owns execution plus read-back verification. A Worker cannot use one binding to execute an unrelated task without leaving visible evidence in the tool arguments and task timeline.
-
-## Audit data
-
-The SQLite database stores redacted, bounded metadata. It must not store access/refresh tokens, Authorization headers, browser cookies, client secrets, raw customer data, or full report payloads. Common secret-shaped keys are replaced with `[redacted]` before persistence.
-
-The audit record is operationally append-only through the HTTP API. The Web interface has no mutation endpoint for actions/events/tasks.
+Control-plane outage, missing catalog, removed tool, unacknowledged drift, malformed args, wrong role, stale task, duplicate decision, batch write, unstructured result or failed verification all stop commitment. Reads remain available in `OBSERVE`; `PAUSED` blocks all Amazon MCP activity.
