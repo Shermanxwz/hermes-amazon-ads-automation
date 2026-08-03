@@ -18,7 +18,10 @@ from urllib.request import Request, urlopen
 
 OFFICIAL_URL = "https://raw.githubusercontent.com/amzn/ads-advanced-tools-docs/main/postman/Amazon_Ads_API.postman_collection.json"
 REQUIRED_CAPABILITIES = {
-    "authentication": ("authentication", "oauth"),
+    "authentication": (
+        "authentication", "oauth", "bearer", "authorization",
+        "amazon-advertising-api-clientid", "access token", "accesstoken",
+    ),
     "profiles": ("profiles",),
     "sponsored_products": ("sponsored products", "sp v3"),
     "sponsored_brands": ("sponsored brands", "sb v4"),
@@ -49,6 +52,33 @@ def request_url(request: dict[str, Any]) -> str:
     return ""
 
 
+def request_contract_text(request: dict[str, Any]) -> str:
+    """Return non-secret Postman contract metadata used for capability detection.
+
+    Authentication is usually represented by header names, variable references or an ``auth``
+    object rather than by an endpoint/folder called "Authentication". Values are never emitted
+    into the generated manifest.
+    """
+    pieces: list[str] = []
+    auth = request.get("auth")
+    if isinstance(auth, dict):
+        pieces.append(str(auth.get("type") or ""))
+        pieces.extend(str(key) for key in auth)
+    headers = request.get("header")
+    if isinstance(headers, list):
+        for header in headers:
+            if isinstance(header, dict):
+                pieces.append(str(header.get("key") or ""))
+                value = str(header.get("value") or "")
+                # Variable names are contract metadata; never retain literal credential values.
+                if value.startswith("{{") and value.endswith("}}"):
+                    pieces.append(value)
+    description = request.get("description")
+    if isinstance(description, str):
+        pieces.append(description[:2000])
+    return " ".join(pieces)
+
+
 def walk_items(items: Any, parents: tuple[str, ...] = ()):
     if not isinstance(items, list):
         return
@@ -66,14 +96,31 @@ def walk_items(items: Any, parents: tuple[str, ...] = ()):
                 "path": " / ".join((*parents, name)),
                 "method": str(request.get("method") or "UNKNOWN").upper(),
                 "url": request_url(request),
+                "contract": request_contract_text(request),
             }
 
 
 def summarize(raw: bytes, source: str) -> dict[str, Any]:
     document = json.loads(raw)
     rows = list(walk_items(document.get("item", [])))
+    collection_contract = json.dumps(
+        {
+            "auth": document.get("auth"),
+            "variables": [
+                str(item.get("key") or "")
+                for item in document.get("variable", [])
+                if isinstance(item, dict)
+            ],
+        },
+        ensure_ascii=False,
+        default=str,
+    )
     searchable = "\n".join(
-        f"{row['path']} {row['method']} {row['url']}".lower() for row in rows
+        [collection_contract.lower()]
+        + [
+            f"{row['path']} {row['method']} {row['url']} {row['contract']}".lower()
+            for row in rows
+        ]
     )
     capabilities = {}
     for name, needles in REQUIRED_CAPABILITIES.items():
@@ -90,7 +137,10 @@ def summarize(raw: bytes, source: str) -> dict[str, Any]:
         "top_folders": dict(top_folders.most_common()),
         "capabilities": capabilities,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "examples": rows[:20],
+        "examples": [
+            {key: value for key, value in row.items() if key != "contract"}
+            for row in rows[:20]
+        ],
     }
 
 
