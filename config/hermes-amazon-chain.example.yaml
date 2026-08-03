@@ -1,8 +1,12 @@
-# WARNING: Example only. Never commit real keys, OAuth tokens, .env files, or token JSON.
-# Safer cron default: keep approvals.cron_mode=deny unless a human-controlled workflow needs an exception.
+# Complete sanitized Hermes example. Keep real values in $HERMES_HOME/.env or a secret manager.
+plugins:
+  enabled:
+    - amazon-ads-control
+
 model:
   default: gpt-5.6-luna
   provider: custom:new-api-230385-codex
+
 providers:
   new-api-230385:
     base_url: https://api.230385.xyz/v1
@@ -34,6 +38,7 @@ providers:
         max_input_tokens: 1000000
         max_output_tokens: 65536
         supports_reasoning: true
+
 mcp_servers:
   amazon-ads:
     url: https://advertising-ai.amazon.com/mcp
@@ -48,17 +53,27 @@ mcp_servers:
     connect_timeout: 60
     timeout: 180
     enabled: true
+
 fallback_providers:
-- provider: custom:new-api-230385
-  model: MiniMax-M3
+  - provider: custom:new-api-230385
+    model: MiniMax-M3
+
 compression:
   enabled: true
   threshold: 0.45
   target_ratio: 0.2
   protect_last_n: 20
+
+# The plugin/control plane is the authorization boundary for Ads writes.
+# Cron must not wait for an interactive approval prompt.
 approvals:
-  cron_mode: deny
+  cron_mode: allow
+
 delegation:
   model: MiniMax-M3
   provider: custom:new-api-230385
   reasoning_effort: max
+  max_concurrent_children: 2
+  max_spawn_depth: 1
+  orchestrator_enabled: false
+  max_iterations: 35

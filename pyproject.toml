@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-amazon-ads-control"
+version = "1.0.0"
+description = "Observable Hermes control plane for autonomous Amazon Ads main/worker operation"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Shermanxwz"}]
+
+[project.scripts]
+amazon-ads-control = "amazon_ads_control.server:main"
+amazon-ads-worker = "amazon_ads_control.worker:main"
+
+[tool.setuptools]
+package-dir = {"" = "control-plane"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["control-plane"]
+
+[tool.setuptools.package-data]
+amazon_ads_control = ["static/*"]

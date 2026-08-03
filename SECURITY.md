@@ -1,25 +1,31 @@
-# Security and secret handling
+# Security
 
-This repository is intended to be private, but privacy is not a substitute for secret hygiene.
+## Secrets
 
-## Never commit
+Never commit or paste into conversations: Amazon client secrets, OAuth access/refresh tokens, authorization codes/state, New-API keys, GitHub tokens, control-plane password hashes tied to a real password, browser profiles/cookies, or Hermes token/session databases.
 
-- GitHub PATs or OAuth tokens
-- Amazon Ads client secrets, access tokens, refresh tokens, authorization codes, or OAuth state
-- New-API keys
-- `.env` files containing real values
-- Hermes `auth.json`, `mcp-tokens/`, `state.db`, Web UI databases, logs, request dumps, backups, or full session transcripts
-- Raw advertising metrics or customer/order payloads unless separately approved
+Store runtime values in `/etc/hermes-amazon-ads-control.env` with mode `0600`, owned by the service user or root. The shared agent token should be at least 32 random characters and is only sent over loopback.
 
-## Local secret locations
+## Network
 
-Use a local secret manager or protected files with `0600` permissions. The example files in this repo contain placeholders only.
+- Bind the control plane to `127.0.0.1`.
+- Publish only through an HTTPS reverse proxy.
+- Do not expose SQLite, browser debugging, xrdp/VNC, or port 8790 directly.
+- The browser API uses password login, HttpOnly SameSite=Strict session cookie, CSRF token, Origin check, bounded sessions, and no-store headers.
+- Agent endpoints use a separate bearer token and should stay loopback-only.
 
-## If a token appears in a chat, log, terminal, or repository
+## LLM/tool boundary
 
-1. Revoke/rotate it at the issuing service.
-2. Remove it from Git history if it was committed.
-3. Re-run the repository secret scan.
-4. Reconfigure the local service with the replacement without pasting the new secret into chat.
+The plugin blocks model-originated Amazon Ads writes from Main and unbound sessions. It does not protect against root, direct database edits, a compromised Hermes/control-plane process, a stolen agent token, or side effects caused by other allowed tools such as shell commands. Keep Hermes terminal approvals/sandbox rules appropriate for the VPS.
 
-The GitHub PAT used for this upload was pasted into the conversation and should be revoked immediately after the upload is verified.
+## Seller Central
+
+The project does not automate authentication challenges, CAPTCHA/2FA, banking, tax, account-health appeals, permissions, or identity verification. Use the fixed VPS browser profile manually for those flows.
+
+## Incident response
+
+1. Set mode to `paused` or disable `execution_enabled`.
+2. Revoke/rotate the affected token or OAuth credential.
+3. Preserve the SQLite DB and Hermes logs.
+4. Review blocked/allowed actions and task bindings.
+5. Read back Amazon Ads objects before reverting; do not blindly replay inverse actions.

@@ -1,0 +1,27 @@
+[Unit]
+Description=Hermes Amazon Ads Control Plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=amazonbot
+Group=amazonbot
+WorkingDirectory=/opt/hermes-amazon-ads-automation
+EnvironmentFile=/etc/hermes-amazon-ads-control.env
+Environment=PYTHONPATH=/opt/hermes-amazon-ads-automation/control-plane
+ExecStart=/opt/hermes-amazon-ads-automation/.venv/bin/python -m amazon_ads_control.server
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/hermes-amazon-ads-control
+MemoryHigh=350M
+MemoryMax=550M
+CPUQuota=80%
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

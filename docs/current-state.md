@@ -1,57 +1,44 @@
-# Current Hermes Amazon Ads chain (sanitized)
+# Current product state
 
-This is a sanitized snapshot prepared for private review. It contains configuration shape and operational policy, not credentials or customer data.
+This repository is now a deployable Hermes-native Amazon Ads autopilot rather than a documentation-only handoff.
 
-## Architecture
+## Runtime chain
 
 ```text
-Amazon Ads OAuth/PKCE
-        -> Hermes native remote MCP (amazon-ads)
-        -> MiniMax-M3 daily read-only audit cron
-        -> Chinese audit report / candidate recommendations
-        -> current GPT main controller reviews and decides
-        -> any ad change requires a separate explicit user-authorized action
+Hermes cron or user conversation
+  -> Main controller reads Ads and creates a bounded task
+  -> Hermes delegate_task starts a child with [ads-task:<id>]
+  -> plugin subagent_start binds the real child session
+  -> pre_tool_call asks the loopback control plane for every Ads operation
+  -> Main writes are blocked; matching Worker writes may proceed
+  -> post_tool_call records redacted outcome and idempotency state
+  -> Worker reads back the entity and completes the task
+  -> Web dashboard exposes tasks, Workers, actions, blocks, and events
 ```
 
-## Live connection facts observed during packaging
+## Enforcement state
 
-- MCP endpoint: `https://advertising-ai.amazon.com/mcp`
-- Hermes transport: native HTTP MCP with OAuth 2.1 PKCE
-- Callback: `http://127.0.0.1:41515/callback/ciYSpNVlbv9P`
-- MCP discovery: 110 tools were reported by `hermes mcp test amazon-ads`
-- The live MCP registration exposes both read and write tools. The current daily job is intended to be read-only by policy; a tool-level `tools.include` allowlist is provided separately for stronger enforcement.
-- Credentials are intentionally absent from this repository. Hermes OAuth tokens belong in `$HERMES_HOME/mcp-tokens/amazon-ads.json` with restrictive permissions.
+- The control plane, not the language model, decides whether an Ads write is allowed.
+- Main can read, analyze, create tasks, delegate, and review; it cannot execute Ads writes.
+- A Worker is trusted only after a real Hermes child session is bound to a task.
+- Writes must match structured `expected_actions` by default.
+- Successful plan keys cannot be executed twice.
+- Delete/archive and unknown Ads operations fail closed.
+- Controller failure leaves clearly classified Ads reads available but blocks writes and unknown operations.
+- No user approval step is required in `autopilot`; the operator can switch the whole system to `observe` or `paused` from the Web panel.
 
-## Model routing
+## Current deployment target
 
-- Daily audit: `MiniMax-M3` via `custom:new-api-230385`
-- Main controller: `gpt-5.6-luna` via `custom:new-api-230385-codex`
-- New-API base: `https://api.230385.xyz/v1`
-- GPT channel: `codex_responses`; the upstream gateway requires streaming Responses requests.
+- Debian/Ubuntu Linux VPS, including the user's 2C2G dedicated-IP host.
+- Control plane: loopback-only Python service, SQLite WAL, approximately 109 MiB RSS in sandbox E2E testing.
+- Browser UI: published through a dedicated HTTPS reverse proxy; no direct public bind.
+- Seller Central browser profile remains separate and is never read by the plugin or control plane.
 
-## Daily job
+## Validation completed
 
-- Job id: `1e1e65c91c40`
-- Schedule: `30 17 * * *`
-- Current name: `Amazon Ads 每日只读审计`
-- The job only collects, checks, and analyzes data. It must not create reports, mutate campaigns, or invoke write endpoints.
-- MiniMax does not make final decisions and must not call a delegation worker.
-- The main controller decides separately, only after explicit user authorization.
+- 26 unit/integration/process tests.
+- Real separate-process main → block → Worker bind → write → result → duplicate block → read-back completion flow.
+- Fresh-directory installation smoke test.
+- Python compile checks and repository secret scan.
 
-## Current known limitations
-
-1. The read-only policy is currently expressed in the cron prompt. The MCP server still advertises write-capable tools unless a `tools.include` allowlist is enabled and validated.
-2. Reporting schema/API failures should be recorded as `metrics_unavailable`; the audit must not create a report to compensate.
-3. A cron row being enabled or scheduled is not proof that an execution completed. Unknown/terminated executions require recovery and read-back.
-4. Context compression must be monitored for long Hermes sessions. The local config enables compression, but already-running agent objects may retain stale runtime flags; a fresh session or explicit `/compress` may be required after a context overflow.
-5. New-API model metadata may overstate the effective upstream context window. Probe the real endpoint and keep operational turns small.
-
-## Sensitive material deliberately excluded
-
-- GitHub token and other API keys
-- Amazon client secret, access token, refresh token, OAuth state/code
-- `$HOME/.config/amazon-ads/credentials.env`
-- `$HERMES_HOME/mcp-tokens/*`
-- Hermes state databases, Web UI database, logs, request dumps, and full session transcripts
-- Backups containing any of the above
-- Raw advertising metrics, order data, and customer/account payloads
+Live Amazon Ads calls are intentionally not fabricated in CI. Final production acceptance still requires the user's existing Amazon OAuth profile and the actual MCP tool schema visible on the VPS.

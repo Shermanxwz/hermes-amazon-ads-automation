@@ -1,27 +1,33 @@
 {
   "package": "hermes-amazon-ads-automation",
-  "purpose": "Private sanitized handoff for ChatGPT review",
-  "source_profile": "default",
-  "source_paths": [
-    "/root/.hermes/config.yaml (sanitized relevant sections)",
-    "/root/.hermes/cron/jobs.json (job 1e1e65c91c40, volatile fields removed)",
-    "/root/.hermes/scripts/sync-newapi-hermes.py",
-    "Hermes Amazon Ads migration reference"
+  "version": "1.0.0",
+  "purpose": "Observable Hermes-native Amazon Ads autopilot with hard main/worker separation",
+  "runtime": {
+    "control_plane": "Python 3.11+ standard library",
+    "database": "SQLite WAL",
+    "hermes_extension": "directory plugin + namespaced skill",
+    "web": "responsive read-only audit dashboard",
+    "target_host": "2C2G Linux VPS"
+  },
+  "capabilities": [
+    "Hermes pre/post tool policy hooks",
+    "real subagent-to-task binding",
+    "planned write matching and idempotency",
+    "bid/budget/action guardrails",
+    "autopilot, observe, and paused modes",
+    "redacted daily task/action/event history",
+    "systemd and HTTPS reverse-proxy deployment examples"
   ],
+  "tests": {
+    "unit_and_integration": 26,
+    "process_e2e": true,
+    "install_smoke": true,
+    "secret_scan": true
+  },
   "excluded": [
-    "credentials.env",
-    "mcp-tokens",
-    "auth.json",
-    "state.db",
-    "Web UI DB",
-    "logs",
-    "sessions",
-    "backups",
-    "all live keys/tokens"
-  ],
-  "mcp_discovered_tools": 110,
-  "job_id": "1e1e65c91c40",
-  "job_model": "MiniMax-M3",
-  "job_provider": "custom:new-api-230385",
-  "job_schedule": "30 17 * * *"
+    "Amazon credentials and OAuth tokens",
+    "Hermes auth/session databases",
+    "raw customer/order/report payloads",
+    "browser cookies and Seller Central credentials"
+  ]
 }

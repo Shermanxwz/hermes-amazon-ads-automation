@@ -1,0 +1,30 @@
+# Third-party Hermes plugins are opt-in. This name comes from plugin.yaml.
+plugins:
+  enabled:
+    - amazon-ads-control
+
+# Merge into ~/.hermes/config.yaml. Keep real values outside Git.
+delegation:
+  provider: custom:new-api-230385
+  model: MiniMax-M3
+  max_concurrent_children: 2
+  max_spawn_depth: 1
+  orchestrator_enabled: false
+  max_iterations: 35
+
+# The existing Amazon Ads remote MCP remains the data/execution surface.
+mcp_servers:
+  amazon-ads:
+    url: https://advertising-ai.amazon.com/mcp
+    auth: oauth
+    enabled: true
+
+# Enable only the toolsets needed by the daily cron session.
+# Exact syntax may vary with the installed Hermes version; verify with `hermes tools`.
+cron:
+  enabled: true
+
+approvals:
+  # No interactive approval is required for the bounded worker workflow.
+  # The amazon-ads-control plugin is the hard policy boundary.
+  cron_mode: allow
