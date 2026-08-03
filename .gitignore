@@ -1,0 +1,18 @@
+# Local secrets and Hermes runtime data
+.env
+*.env
+*.env.*
+!config/secrets.env.example
+mcp-tokens/
+auth.json
+state.db
+*.db
+*.sqlite*
+logs/
+sessions/
+request_dump_*.json
+backups/
+*.bak
+*.pyc
+__pycache__/
+.DS_Store

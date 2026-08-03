@@ -1,0 +1,64 @@
+# WARNING: Example only. Never commit real keys, OAuth tokens, .env files, or token JSON.
+# Safer cron default: keep approvals.cron_mode=deny unless a human-controlled workflow needs an exception.
+model:
+  default: gpt-5.6-luna
+  provider: custom:new-api-230385-codex
+providers:
+  new-api-230385:
+    base_url: https://api.230385.xyz/v1
+    api_key: ${NEW_API_API_KEY}
+    api_mode: chat_completions
+    models:
+      MiniMax-M3:
+        model: MiniMax-M3
+        max_input_tokens: 200000
+        max_output_tokens: 32768
+        supports_reasoning: true
+  new-api-230385-codex:
+    base_url: https://api.230385.xyz/v1
+    api_key: ${NEW_API_API_KEY}
+    api_mode: codex_responses
+    models:
+      gpt-5.6-luna:
+        model: gpt-5.6-luna
+        max_input_tokens: 1000000
+        max_output_tokens: 65536
+        supports_reasoning: true
+      gpt-5.6-sol:
+        model: gpt-5.6-sol
+        max_input_tokens: 1000000
+        max_output_tokens: 65536
+        supports_reasoning: true
+      gpt-5.6-terra:
+        model: gpt-5.6-terra
+        max_input_tokens: 1000000
+        max_output_tokens: 65536
+        supports_reasoning: true
+mcp_servers:
+  amazon-ads:
+    url: https://advertising-ai.amazon.com/mcp
+    auth: oauth
+    oauth:
+      client_id: ${AMAZON_ADS_CLIENT_ID}
+      scope: profile
+      redirect_port: 41515
+      redirect_uri: http://127.0.0.1:41515/callback/ciYSpNVlbv9P
+      client_secret: ${AMAZON_ADS_CLIENT_SECRET}
+      token_endpoint_auth_method: client_secret_basic
+    connect_timeout: 60
+    timeout: 180
+    enabled: true
+fallback_providers:
+- provider: custom:new-api-230385
+  model: MiniMax-M3
+compression:
+  enabled: true
+  threshold: 0.45
+  target_ratio: 0.2
+  protect_last_n: 20
+approvals:
+  cron_mode: deny
+delegation:
+  model: MiniMax-M3
+  provider: custom:new-api-230385
+  reasoning_effort: max

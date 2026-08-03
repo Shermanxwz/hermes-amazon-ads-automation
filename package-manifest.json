@@ -1,0 +1,27 @@
+{
+  "package": "hermes-amazon-ads-automation",
+  "purpose": "Private sanitized handoff for ChatGPT review",
+  "source_profile": "default",
+  "source_paths": [
+    "/root/.hermes/config.yaml (sanitized relevant sections)",
+    "/root/.hermes/cron/jobs.json (job 1e1e65c91c40, volatile fields removed)",
+    "/root/.hermes/scripts/sync-newapi-hermes.py",
+    "Hermes Amazon Ads migration reference"
+  ],
+  "excluded": [
+    "credentials.env",
+    "mcp-tokens",
+    "auth.json",
+    "state.db",
+    "Web UI DB",
+    "logs",
+    "sessions",
+    "backups",
+    "all live keys/tokens"
+  ],
+  "mcp_discovered_tools": 110,
+  "job_id": "1e1e65c91c40",
+  "job_model": "MiniMax-M3",
+  "job_provider": "custom:new-api-230385",
+  "job_schedule": "30 17 * * *"
+}
