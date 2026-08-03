@@ -17,9 +17,31 @@ class IntegrationUtilityTests(unittest.TestCase):
         folders=[]
         for name in ["Authentication OAuth","Profiles","Sponsored Products SP v3","Sponsored Brands SB v4","Sponsored Display","Reporting","Amazon Marketing Stream","Recommendations","Budget rules","Test accounts","Exports"]:
             folders.append({"name":name,"item":[{"name":"call","request":{"method":"GET","url":{"raw":"https://example/"+name}}}]})
-        raw=json.dumps({"info":{"name":"Amazon Ads API","schema":"x"},"item":folders}).encode()
+        raw=json.dumps({
+            "info":{"name":"Amazon Ads API","schema":"x"},
+            "variable":[{"key":"accessToken"},{"key":"clientId"}],
+            "item":folders,
+        }).encode()
         summary=postman.summarize(raw,"fixture")
         self.assertTrue(all(summary["capabilities"].values())); self.assertEqual(summary["request_count"],11)
+
+
+    def test_postman_authentication_detected_from_request_contract(self):
+        raw=json.dumps({
+            "info":{"name":"Amazon Ads API"},
+            "item":[{
+                "name":"Profiles",
+                "item":[{"name":"List","request":{
+                    "method":"GET",
+                    "url":"https://example/profiles",
+                    "auth":{"type":"bearer","bearer":[{"key":"token","value":"{{accessToken}}"}]},
+                    "header":[{"key":"Amazon-Advertising-API-ClientId","value":"{{clientId}}"}],
+                }}],
+            }],
+        }).encode()
+        summary=postman.summarize(raw,"fixture")
+        self.assertTrue(summary["capabilities"]["authentication"])
+        self.assertNotIn("accessToken", json.dumps(summary.get("examples", [])))
 
     def test_postman_walk_nested(self):
         raw=json.dumps({"info":{},"item":[{"name":"A","item":[{"name":"B","item":[{"name":"C","request":{"method":"POST","url":"u"}}]}]}]}).encode()
