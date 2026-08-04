@@ -122,7 +122,9 @@ class ClosedLoopV3Tests(unittest.TestCase):
             "decision_id": decision["id"], "session_id": "verify", "evidence_action_id": read["action_id"],
         })
         self.assertEqual(verified["status"], "mismatch")
-        self.assertEqual(verified["actual"]["targetId"], "t1")
+        record = self.env.store.list_verifications(1, decision_id=decision["id"])[0]
+        self.assertEqual(record["actual"]["targetId"], "t1")
+        self.assertEqual(record["actual"]["bid"], 0.7)
 
     def test_server_recomputes_catalog_risk(self):
         raw = dict(WRITE_TARGET)
