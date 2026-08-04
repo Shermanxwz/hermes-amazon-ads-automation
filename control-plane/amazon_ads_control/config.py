@@ -96,10 +96,11 @@ class Settings:
     def validate_runtime(self) -> None:
         if len(self.agent_token) < 32 or self.agent_token.strip() != self.agent_token:
             raise ValueError("ADS_CONTROL_AGENT_TOKEN must be at least 32 non-whitespace-delimited characters")
-        if len(self.operator_token) < 32 or self.operator_token.strip() != self.operator_token:
-            raise ValueError("ADS_CONTROL_OPERATOR_TOKEN must be at least 32 non-whitespace-delimited characters")
-        if hmac.compare_digest(self.agent_token, self.operator_token):
-            raise ValueError("ADS_CONTROL_OPERATOR_TOKEN must differ from ADS_CONTROL_AGENT_TOKEN")
+        if self.operator_token:
+            if len(self.operator_token) < 32 or self.operator_token.strip() != self.operator_token:
+                raise ValueError("ADS_CONTROL_OPERATOR_TOKEN must be at least 32 non-whitespace-delimited characters")
+            if hmac.compare_digest(self.agent_token, self.operator_token):
+                raise ValueError("ADS_CONTROL_OPERATOR_TOKEN must differ from ADS_CONTROL_AGENT_TOKEN")
         parts = self.control_password_hash.split("$")
         if len(parts) != 4 or parts[0] != "pbkdf2_sha256" or not parts[1].isdigit():
             raise ValueError(
