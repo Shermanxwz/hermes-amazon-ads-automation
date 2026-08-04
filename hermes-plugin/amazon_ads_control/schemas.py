@@ -6,20 +6,25 @@ SYNC_CATALOG = {
 CREATE_REPORT = {
     "name": "ads_control_create_report_job",
     "description": "Create or recover one persistent Amazon Ads report job from a stable profile/type/window/schema key.",
+    "parameters": {"type": "object", "properties": {"spec": {"type": "object"}}, "required": ["spec"]},
+}
+REPORT_EVIDENCE = {
+    "name": "ads_control_report_evidence",
+    "description": "List successful structured Amazon report actions for the current Hermes session so lifecycle transitions can cite exact evidence_action_id values.",
     "parameters": {
         "type": "object",
-        "properties": {"spec": {"type": "object"}},
-        "required": ["spec"],
+        "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}},
     },
 }
 TRANSITION_REPORT = {
     "name": "ads_control_transition_report",
-    "description": "Advance one persistent report through the enforced lifecycle. INGESTED requires content, normalized and schema hashes plus row_count.",
+    "description": "Advance one persistent report. Amazon-driven states require a recorded report action; VALIDATED requires the normalized snapshot; the controller computes all hashes.",
     "parameters": {
         "type": "object",
         "properties": {
             "report_job_id": {"type": "string"},
             "status": {"type": "string", "enum": ["SUBMITTED", "IN_PROGRESS", "SUCCEEDED", "DOWNLOADED", "VALIDATED", "INGESTED", "FAILED", "QUARANTINED"]},
+            "evidence_action_id": {"type": "integer", "minimum": 1},
             "data": {"type": "object"},
         },
         "required": ["report_job_id", "status"],
@@ -27,7 +32,7 @@ TRANSITION_REPORT = {
 }
 PLAN_CYCLE = {
     "name": "ads_control_plan_cycle",
-    "description": "Run deterministic strategy only on a mature normalized snapshot cryptographically tied to one or more INGESTED report jobs.",
+    "description": "Run deterministic strategy only on the exact controller-stored normalized snapshot of one or more INGESTED report jobs.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -108,9 +113,5 @@ FINALIZE = {
 STREAM = {
     "name": "ads_control_ingest_stream_events",
     "description": "Ingest deduplicated Amazon Marketing Stream envelopes for risk monitoring and audit.",
-    "parameters": {
-        "type": "object",
-        "properties": {"events": {"type": "array", "items": {"type": "object"}}},
-        "required": ["events"],
-    },
+    "parameters": {"type": "object", "properties": {"events": {"type": "array", "items": {"type": "object"}}}, "required": ["events"]},
 }
