@@ -41,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("--database", help="database path; defaults to ADS_CONTROL_DB")
     backup.add_argument("--output", required=True, help="backup output path")
 
+    storage = sub.add_parser("storage-status", help="show database, WAL, free-space and row-count pressure")
+    storage.add_argument("--database", help="database path; defaults to ADS_CONTROL_DB")
+
+    maintain = sub.add_parser("maintain-storage", help="run retention, compaction, checkpoint and safe reclaim now")
+    maintain.add_argument("--database", help="database path; defaults to ADS_CONTROL_DB")
+
     doctor = sub.add_parser("doctor", help="validate runtime configuration and database health")
     doctor.add_argument("--full", action="store_true", help="use the full integrity_check pragma")
     return parser
@@ -71,6 +77,15 @@ def main(argv: list[str] | None = None) -> int:
         result = Store(_database_path(args.database)).backup_to(Path(args.output))
         print(json.dumps(result, ensure_ascii=False))
         return 0
+    if args.command == "storage-status":
+        result = Store(_database_path(args.database)).storage_status()
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    if args.command == "maintain-storage":
+        settings = Settings.from_env()
+        result = Store(_database_path(args.database)).maintain_storage(settings)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if not result.get("error") else 3
     if args.command == "doctor":
         try:
             settings = Settings.from_env()
@@ -83,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         output = {
             "ok": result["ok"], "version": __version__, "database": result,
+            "storage": store.storage_status(),
             "expired_reservations_quarantined": len(expired),
             "bind": f"{settings.host}:{settings.port}", "public_origin": settings.public_origin,
         }
