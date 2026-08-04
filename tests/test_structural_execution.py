@@ -170,18 +170,16 @@ class StructuralExecutionTests(unittest.TestCase):
             }]
         }
         context = self.service.context("executor")
-        rendered_from_context = next(
-            item["rendered_arguments"] for item in context["decisions"] if item["id"] == ad_group["id"]
+        dependent = next(item for item in context["decisions"] if item["id"] == ad_group["id"])
+        self.assertEqual(dependent["rendered_arguments"], rendered)
+        self.assertEqual(
+            dependent["payload"]["expected_state"],
+            {"campaignId": "AMZ-CAMPAIGN-123", "name": "Exact Ad Group", "defaultBid": 0.75},
         )
-        self.assertEqual(rendered_from_context, rendered)
-
-        allowed = self.service.authorize_tool({
-            "tool_name": CREATE_AD_GROUP["registered_name"],
-            "args": rendered,
-            "session_id": "executor",
-            "tool_call_id": "ad-group-call",
-        })
-        self.assertTrue(allowed["allowed"], allowed)
+        self.assertEqual(
+            dependent["payload"]["approved_expected_state"]["campaignId"],
+            "{{decision:campaign-step.entity_id}}",
+        )
 
         tampered = self.service.authorize_tool({
             "tool_name": CREATE_AD_GROUP["registered_name"],
@@ -197,6 +195,14 @@ class StructuralExecutionTests(unittest.TestCase):
         })
         self.assertFalse(tampered["allowed"])
 
+        allowed = self.service.authorize_tool({
+            "tool_name": CREATE_AD_GROUP["registered_name"],
+            "args": rendered,
+            "session_id": "executor",
+            "tool_call_id": "ad-group-call",
+        })
+        self.assertTrue(allowed["allowed"], allowed)
+
     def test_missing_created_id_quarantines_and_blocks_dependents(self):
         result = self.plan()
         task_id, _approval = self.approve_and_bind(result)
@@ -209,14 +215,14 @@ class StructuralExecutionTests(unittest.TestCase):
             "tool_call_id": "campaign-call",
         })
         self.assertTrue(authorized["allowed"], authorized)
-        result = self.store.mark_execution(
+        execution = self.store.mark_execution(
             decision_id=campaign["id"],
             reservation_token=authorized["reservation_token"],
             tool_name=CREATE_CAMPAIGN["registered_name"],
             outcome="success",
             result={"status": "SUCCESS"},
         )
-        self.assertEqual(result["status"], "uncertain")
+        self.assertEqual(execution["status"], "uncertain")
         context = self.service.context("executor")
         dependent = next(item for item in context["decisions"] if item["plan_key"] == "ad-group-step")
         self.assertIn("rendering_blocked", dependent)
@@ -231,6 +237,7 @@ class StructuralExecutionTests(unittest.TestCase):
                     "depends_on": ["parent"],
                     "tool_name": CREATE_AD_GROUP["registered_name"],
                     "action_type": "create_ad_group",
+                    "entity_id": "planned:child",
                     "arguments": {"adGroups": [{
                         "campaignId": "{{decision:parent.entity_id}}", "name": "x", "defaultBid": 0.5,
                     }]},
@@ -240,6 +247,7 @@ class StructuralExecutionTests(unittest.TestCase):
                     "plan_key": "parent",
                     "tool_name": CREATE_CAMPAIGN["registered_name"],
                     "action_type": "create_campaign",
+                    "entity_id": "planned:parent",
                     "arguments": {"campaigns": [{"name": "x", "budget": 10}]},
                     "expected_state": {"name": "x"},
                 },
