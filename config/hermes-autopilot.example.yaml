@@ -10,23 +10,38 @@ delegation:
   max_concurrent_children: 1
   max_spawn_depth: 1
   orchestrator_enabled: false
+  inherit_mcp_toolsets: true
+  subagent_auto_approve: false
   max_iterations: 35
 
-# The existing Amazon Ads remote MCP remains the data/execution surface.
+# Amazon Ads official remote MCP is the data/execution capability surface.
+# Keep one canonical server name: Hermes registers tools as mcp_amazon_ads_*.
 mcp_servers:
   amazon-ads:
     url: https://advertising-ai.amazon.com/mcp
     auth: oauth
     enabled: true
+    connect_timeout: 60
+    timeout: 120
+    supports_parallel_tool_calls: false
+    tools:
+      prompts: false
+      resources: false
+    # If the server does not support dynamic client registration, uncomment
+    # the pre-registered Login with Amazon client below. Hermes resolves ${...}
+    # from ~/.hermes/.env at connection time and stores OAuth tokens separately.
+    # oauth:
+    #   client_id: ${AMAZON_ADS_MCP_CLIENT_ID}
+    #   client_secret: ${AMAZON_ADS_MCP_CLIENT_SECRET}
 
 # Enable only the toolsets needed by the daily cron session.
-# Exact syntax may vary with the installed Hermes version; verify with `hermes tools`.
 cron:
   enabled: true
 
 approvals:
-  # Routine bounded operations never wait on Hermes' native prompt.
-  # High-risk plans are paused in awaiting_approval and require either:
-  #   /ads-approve <approval_id> <payload_hash-prefix>
-  # or the authenticated approval panel in the local control Web.
+  # Routine bounded operations never wait on Hermes' native terminal prompt.
+  # High-risk plans pause in awaiting_approval and are approved in the
+  # authenticated local Web. /ads-approve remains disabled unless a separately
+  # isolated Gateway explicitly enables command approval and has no terminal,
+  # file, or environment-reading capability.
   cron_mode: allow
