@@ -18,6 +18,7 @@ def load(name,path):
 
 reach=load("reachability_test",ROOT/"scripts/check_amazon_mcp_reachability.py")
 sync=load("official_sync_test",ROOT/"scripts/sync_official_contracts.py")
+fingerprint=load("official_fingerprint_test",ROOT/"scripts/check_official_fingerprint.py")
 secrets=load("secret_scan_test",ROOT/"scripts/verify-no-secrets.py")
 
 class Response:
@@ -51,6 +52,23 @@ class OfficialScriptTests(unittest.TestCase):
             path.write_text("not-json")
             with patch("sys.argv",["sync", "--source",str(path)]), redirect_stderr(io.StringIO()):
                 self.assertEqual(sync.main(),2)
+
+    def test_fingerprint_accepts_exact_manifest_and_rejects_drift(self):
+        with tempfile.TemporaryDirectory() as td:
+            manifest=Path(td)/"manifest.json"; baseline=Path(td)/"baseline.json"
+            current={
+                "semantic_sha256":"abc","request_count":2,
+                "capabilities":{"profiles":True},"extended_capabilities":{"stores":True},
+            }
+            manifest.write_text(json.dumps(current)); baseline.write_text(json.dumps({"semantic_sha256":"abc","request_count":2}))
+            with patch("sys.argv",["fingerprint","--manifest",str(manifest),"--baseline",str(baseline)]), redirect_stdout(io.StringIO()):
+                self.assertEqual(fingerprint.main(),0)
+            current["semantic_sha256"]="changed"; manifest.write_text(json.dumps(current))
+            with patch("sys.argv",["fingerprint","--manifest",str(manifest),"--baseline",str(baseline)]), redirect_stderr(io.StringIO()):
+                self.assertEqual(fingerprint.main(),1)
+            manifest.write_text("bad")
+            with patch("sys.argv",["fingerprint","--manifest",str(manifest),"--baseline",str(baseline)]), redirect_stderr(io.StringIO()):
+                self.assertEqual(fingerprint.main(),2)
 
     def test_secret_scanner_safe_hit_binary_and_cli(self):
         with tempfile.TemporaryDirectory() as td:
