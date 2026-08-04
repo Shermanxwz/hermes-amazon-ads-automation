@@ -19,7 +19,8 @@ def main() -> int:
         (home / "config.yaml").write_text("plugins:\n  enabled:\n    - amazon-ads-control\n")
         os.environ["HERMES_HOME"] = str(home)
         os.environ["ADS_CONTROL_AGENT_TOKEN"] = "agent-" + "x" * 48
-        os.environ["ADS_CONTROL_OPERATOR_TOKEN"] = "operator-" + "y" * 48
+        os.environ.pop("ADS_CONTROL_OPERATOR_TOKEN", None)
+        os.environ.pop("ADS_CONTROL_ENABLE_COMMAND_APPROVAL", None)
         os.environ["ADS_CONTROL_URL"] = "http://127.0.0.1:9"
 
         from hermes_cli.plugins import PluginManager
@@ -57,6 +58,8 @@ def main() -> int:
         assert expected_tools.issubset(set(loaded.tools_registered)), loaded.tools_registered
         assert expected_hooks.issubset(set(loaded.hooks_registered)), loaded.hooks_registered
         assert expected_commands.issubset(set(loaded.commands_registered)), loaded.commands_registered
+        assert "ADS_CONTROL_OPERATOR_TOKEN" not in os.environ
+        assert "ADS_CONTROL_ENABLE_COMMAND_APPROVAL" not in os.environ
         for name in expected_tools:
             assert registry.get_schema(name), f"missing schema for {name}"
             entry = registry.get_entry(name)
@@ -65,10 +68,11 @@ def main() -> int:
         assert skill.is_file()
         text = skill.read_text(encoding="utf-8")
         assert "Approval-Gated Full Autopilot" in text
-        assert "/ads-approve" in text
+        assert "authenticated local control Web" in text
         print(
             f"real-hermes-smoke: OK ({len(expected_tools)} tools, "
-            f"{len(loaded.hooks_registered)} hooks, {len(loaded.commands_registered)} commands)"
+            f"{len(loaded.hooks_registered)} hooks, {len(loaded.commands_registered)} commands, "
+            "Web-only approval default)"
         )
     return 0
 
