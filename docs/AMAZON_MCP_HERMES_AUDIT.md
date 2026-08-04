@@ -2,218 +2,212 @@
 
 Audit date: **2026-08-04**
 
-This document separates four different kinds of evidence. They must never be collapsed into one vague claim that the integration is “perfect.”
+This audit keeps four evidence classes separate:
 
-1. **Official capability evidence** — Amazon's public Advanced Tools Postman collection and MCP announcement.
-2. **Repository contract evidence** — code, configuration, policy manifests and tests in this branch.
-3. **Executed sandbox evidence** — isolated protocol/state-machine execution without owner credentials.
-4. **Credentialed production evidence** — OAuth, live tools, real reports, real writes and real read-back in the owner environment.
+1. Amazon public capability evidence;
+2. repository implementation and contract evidence;
+3. executed isolated sandbox evidence;
+4. owner-credentialed production evidence.
 
-## Executive conclusion
+A lower layer never proves a higher layer.
 
-The branch is now architecturally **Hermes-native and Amazon-MCP-driven**, but it is not yet entitled to a production-perfect certification.
+## Conclusion
 
-- The control plane no longer depends on a guessed static Amazon tool list. It imports the live Hermes MCP Registry contract and hashes each Schema.
-- Hermes' Tool, Hook, Skill, Slash Command, Session and Delegation surfaces are explicitly integrated.
-- Routine decisions remain deterministic and bounded.
-- Structural work is exact-payload approval-gated and independently verified.
-- Black-box composite workflows, account administration, billing and irreversible deletion remain blocked by design.
-- NA/EU/FE Profile-to-tool routing is machine-enforced for reads, jobs and writes when the MCP Toolset is region-tagged.
-- A live MCP contract auditor now performs `initialize`, `notifications/initialized`, paginated `tools/list`, schema hashing and authority classification.
-- Every public Postman capability discovered by the semantic compiler must have an explicit project policy.
+The branch is architecturally **Hermes-native, live-MCP-driven, regionalized and fail-closed**. It is not yet production-perfect certified because real Amazon credentials, real Hermes surfaces, the target VPS and a functioning CI Runner are still external acceptance boundaries.
 
-Release remains blocked until the credentialed acceptance items at the end of this document pass.
+Current executed isolated evidence is recorded in `SANDBOX_EXECUTION_2026-08-04.md`:
 
-## Official source surface reviewed
+- **104 PASS**;
+- **0 FAIL**;
+- **15 EXTERNAL**;
+- overall `PASS_WITH_EXTERNAL_ACCEPTANCE`.
 
-The public Postman collection was reviewed as a contract inventory, including:
+## Official Amazon surface reviewed
 
-- OAuth and Profiles;
-- Manager Accounts;
-- Sponsored Products;
-- Sponsored Brands;
-- Sponsored Display;
+The public Advanced Tools Postman collection was treated as a capability inventory, including:
+
+- OAuth, Profiles and Manager Accounts;
+- Sponsored Products, Sponsored Brands and Sponsored Display;
 - Sponsored TV;
 - DSP reporting and related contracts;
-- Reporting;
-- Amazon Marketing Stream;
+- Reporting, Snapshots and Exports;
+- Marketing Stream;
 - Recommendations;
 - Budget and Budget Rules;
 - Test Accounts;
-- Snapshots and Exports;
 - Amazon Marketing Cloud administration, reporting and audiences;
 - Product metadata and eligibility;
 - Creative Asset Library;
-- Stores;
-- Locations;
-- Partner opportunities.
+- Stores, Locations and Partner opportunities.
 
-The Postman collection proves that public API contracts exist. It does **not** prove that a particular Ads MCP tenant currently exposes every corresponding tool or Schema. The live MCP audit is therefore a separate gate.
+Public API existence does not prove that a particular Amazon Ads MCP tenant exposes the same Tool or Schema. Live MCP discovery remains authoritative.
 
-Official references:
+References:
 
 - `https://github.com/amzn/ads-advanced-tools-docs/tree/main/postman`
 - `https://advertising-ai.amazon.com/mcp`
 - `https://advertising.amazon.com/library/news/amazon-ads-mcp-server-open-beta/`
 
-## Capability-policy matrix
+## Explicit capability policy
 
-The machine-readable source of truth is `official/project-capability-policy.json`.
+`official/project-capability-policy.json` assigns every audited capability one treatment:
 
-| Capability group | Project treatment | Autonomous mutation authority |
-|---|---|---|
-| OAuth | Owner acceptance only; Hermes stores tokens | None |
-| Profiles / Manager Accounts | Read-only identity, currency and region context | None |
-| SP routine bid/budget/placement/negative/harvest | Deterministic bounded execution | Yes, inside immutable limits |
-| Campaign / Ad Group / Target / Keyword / Ad / Portfolio creation | Exact atomic plan and operator approval | Yes, after exact approval |
-| SB / SD / STV structural work | Live-schema plan and approval | Yes, only after product-specific acceptance |
-| Reporting / Snapshots / Exports | Persistent bounded data jobs | No delivery mutation |
-| Marketing Stream | Deduplicated monitoring and alerts | No direct mutation |
-| Recommendations | Read and explain; exact approved apply only | Never blind-apply |
-| Product metadata / eligibility | Read-only planning evidence | None |
-| Creative assets / Stores / Locations | Read-only context by default | No autonomous administration |
-| AMC / DSP | Read-only/out-of-scope for the current strategy engine | None |
-| End-to-end campaign MCP workflow | Compile and decompose to atomic decisions | Direct black-box call blocked |
-| Locale expansion MCP workflow | Compile and decompose with regional isolation | Direct black-box call blocked |
-| Billing / finance | Permanently blocked | None |
-| Users / roles / permissions / account links | Permanently blocked | None |
-| Delete / archive / remove | Permanently blocked | None |
+- routine autonomous;
+- exact operator-approved atomic execution;
+- bounded data job;
+- read-only context;
+- compile and decompose;
+- production acceptance only;
+- permanently blocked.
 
-This is deliberate least privilege, not incomplete error handling. A capability can be connected and discoverable while still having no model-originated write authority.
+`scripts/check_project_capability_policy.py` fails when a newly discovered official capability has no policy.
 
-## MCP protocol integration
+Key decisions:
 
-`scripts/check_amazon_mcp_contract.py` audits the live server independently of model behavior:
+| Capability | Treatment |
+|---|---|
+| Mature SP bid/budget/placement/negative/harvest | Routine deterministic autonomy |
+| Campaign/Ad Group/Target/Keyword/Ad/Portfolio creation | Exact approval, then atomic execution |
+| SB/SD/STV structural work | Product-specific acceptance plus exact approval |
+| Reports/Snapshots/Exports/Stream | Bounded data jobs or monitoring |
+| Recommendations | Read/explain; never blind-apply |
+| Product metadata/eligibility | Read-only evidence |
+| AMC/DSP/creative/store/location administration | Read-only or outside current autonomous strategy |
+| MCP end-to-end Campaign workflow | Compile to atomic decisions; direct black-box write blocked |
+| MCP locale expansion | Compile to regionalized atomic plan; direct black-box write blocked |
+| Billing/account administration/delete | Permanently blocked |
 
-1. validates HTTPS endpoint shape and rejects embedded credentials;
-2. sends MCP `initialize` with a declared protocol version and client identity;
-3. captures the server contract and session identifier;
+## Live MCP protocol contract
+
+`scripts/check_amazon_mcp_contract.py` independently:
+
+1. validates the endpoint shape and rejects embedded credentials;
+2. sends MCP `initialize`;
+3. records the server contract and Session identifier;
 4. sends `notifications/initialized`;
-5. retrieves every `tools/list` page with cursor-loop protection;
-6. requires unique names and object-root input Schemas;
-7. hashes descriptions and Schemas deterministically;
-8. classifies read, job, write, composite, destructive, billing and account-administration authority;
-9. checks required account/Profile, reporting and Campaign workflow coverage;
-10. emits a non-secret manifest suitable for drift comparison.
+5. follows every `tools/list` cursor page;
+6. rejects duplicate names and malformed input Schemas;
+7. hashes Tool descriptions and Schemas deterministically;
+8. classifies read, job, write, composite, destructive, billing and account authority;
+9. checks Profile, reporting, Campaign-read and Campaign-create workflow coverage;
+10. emits a non-secret manifest for drift review.
 
-Unauthenticated HTTP `401` is treated as proof that the protected endpoint exists, not as proof of a successful integration. Production requires authenticated `initialize` and a complete live manifest.
+An unauthenticated `401` proves only that the protected endpoint exists. Production acceptance requires authenticated initialize and complete live discovery.
 
-## Regional isolation
+## Regional NA/EU/FE isolation
 
-Amazon's public API documentation requires separate regional Profile discovery for NA, EU and FE. A Profiles call only returns the Profile for the regional endpoint being used.
+Amazon Profiles are regional. The integration supports:
 
-The integration now supports Hermes Toolsets named:
-
-- `mcp-amazon-ads` with an explicit `ADS_MCP_DEFAULT_REGION`;
+- canonical `mcp-amazon-ads`, explicitly tagged by `ADS_MCP_DEFAULT_REGION`;
 - `mcp-amazon-ads-na`;
 - `mcp-amazon-ads-eu`;
 - `mcp-amazon-ads-fe`.
 
-The plugin tags every discovered tool as `hermes-registry:na|eu|fe`. The controller then checks:
+The Hermes plugin tags Catalog rows as `hermes-registry:na|eu|fe`. The controller enforces region matching for:
 
-- task Profile region versus Executor/Verifier tool region;
-- report and export Profile IDs versus job tool region;
-- Main read arguments versus known Profile region;
-- structural plan Profile versus every action tool region;
-- that one task/call does not span multiple regions.
+- Main Profile-scoped reads;
+- report/export jobs;
+- structural plans;
+- Executor writes;
+- Verifier reads;
+- every Profile-bound task.
 
-Account/Profile discovery may run before a Profile exists locally. Other tagged regional calls require a known Profile or Profile-bound task.
+A call or task cannot span regions. Account/Profile discovery is the only tagged regional call permitted before a Profile is known locally.
 
-The public MCP announcement confirms global availability, but it does not publicly enumerate separate EU/FE MCP hostnames. Deployment must use the exact endpoint supplied by Amazon/onboarding; examples intentionally do not guess regional hostnames.
+Amazon's public MCP announcement does not enumerate separate EU/FE MCP hostnames. Deployment examples therefore require the exact endpoint supplied by Amazon/onboarding and never guess regional hostnames.
 
 ## Hermes 0.18.2 integration
 
-The pinned compatibility target is `hermes-agent==0.18.2` / `v2026.7.7.2`.
+Pinned target: `hermes-agent==0.18.2`, tag `v2026.7.7.2`.
 
-### Registered surfaces
+Registered surfaces:
 
 - 15 `ads_control_*` Tools;
 - 10 Plugin Hooks;
 - 3 Slash Commands;
-- 1 namespaced Skill.
+- one namespaced Skill.
 
-### Hook coverage
+Hook behavior:
 
-- `pre_llm_call`: injects role, mode, task, decisions, reports, approval state, regional MCP state, resources and Outbox state;
-- `post_llm_call`: records active session/model/fallback telemetry;
-- `pre_tool_call`: final fail-closed authorization before any Amazon MCP call;
-- `post_tool_call`: persists the original result envelope without replaying the Amazon mutation;
-- Session start/end/finalize/reset lifecycle;
-- Subagent start/stop binding and closure.
+- `pre_llm_call`: role, mode, task, decisions, reports, approvals, regions, resources and Outbox;
+- `post_llm_call`: Session/model/fallback telemetry;
+- `pre_tool_call`: final Amazon MCP authorization;
+- `post_tool_call`: original result delivery without mutation replay;
+- Session start/end/finalize/reset;
+- Subagent start/stop.
 
-### Delegation contract
+Delegation contract:
 
-- `[ads-task:<id>]` and `[ads-role:executor|verifier]` markers are mandatory;
-- Executor and Verifier must use different Hermes Sessions;
-- `max_spawn_depth: 1` and `orchestrator_enabled: false` prevent uncontrolled trees;
-- `inherit_mcp_toolsets: true` preserves the Amazon MCP Toolset in narrowed children;
-- `subagent_auto_approve: false` prevents dangerous terminal approval in child threads;
-- `max_concurrent_children: 1` runs Executor and Verifier sequentially on the 2C2G target;
-- unexpected model fallback forces `OBSERVE` and disables execution.
+- task and role markers are mandatory;
+- Executor and Verifier use different Sessions;
+- `max_spawn_depth: 1`;
+- `orchestrator_enabled: false`;
+- `inherit_mcp_toolsets: true`;
+- `subagent_auto_approve: false`;
+- `max_concurrent_children: 1` on 2C2G;
+- model fallback forces OBSERVE and disables writes.
 
-### Approval trust boundary
+Hermes 0.18.2 has one dependable global delegation model setting. Different Session is a hard security boundary; different model is optional hardening when the installed runtime can prove per-child routing.
 
-Slash Commands are registered for interaction consistency, but mutation commands are disabled by default. Normal Hermes receives only the machine Agent Token. The Operator Token is absent/empty in the default deployment. Human approval is performed through the authenticated Web with Session, Origin, CSRF, exact Hash and typed confirmation.
+## Approval trust boundary
 
-## Findings fixed during this audit
+Normal Hermes receives only the Agent Token. Operator Token is absent/empty by default. Slash Commands are registered for consistent interaction but approval/rejection mutation is disabled unless a separately isolated Gateway explicitly enables it and has no terminal, file or environment-reading capability.
 
-1. `write_batch_hardening.py` existed but was not installed at package startup. It is now active.
-2. The full Hermes example used an incorrect OAuth scope and fields not honored by Hermes 0.18.2. It now uses `advertising::campaign_management`, `redirect_port`, and Hermes' supported pre-registered client fields.
-3. MCP Toolset inheritance, child auto-approval, parallel-call behavior and timeouts were implicit. They are now explicit deployment contracts.
-4. The canonical plugin only scanned `mcp-amazon-ads`. It now discovers optional NA/EU/FE Toolsets and tags their source region.
-5. Regional enforcement previously covered neither reports nor verifier reads. It now applies at the complete Tool Check boundary.
-6. The project had no protocol-level authenticated MCP manifest generator. The live contract auditor was added.
-7. Public Postman capability existence and project authority policy were conflated. A complete capability-policy manifest and CI checker were added.
-8. The real Hermes smoke previously depended on an Operator Token. It now verifies successful plugin loading with Web-only approval defaults.
+Default human authority is the authenticated Web:
 
-## Executed isolated sandbox
+- password Session;
+- HttpOnly Cookie;
+- Origin validation;
+- CSRF;
+- full canonical plan display;
+- exact Hash;
+- typed confirmation phrase;
+- expiry;
+- one-time decision consumption.
 
-An independent isolated simulation was executed during this audit with the following result:
+## Material defects fixed during the audit
 
-- **92 PASS**;
-- **0 unhandled FAIL**;
-- **14 EXTERNAL acceptance items**;
-- overall: `PASS_WITH_EXTERNAL_ACCEPTANCE`.
+1. `write_batch_hardening.py` existed but was not installed at package startup.
+2. The Hermes example used the wrong OAuth scope and unsupported/ignored OAuth fields.
+3. MCP Toolset inheritance, child auto-approval, timeouts and parallel-call behavior were implicit.
+4. The plugin scanned only canonical `mcp-amazon-ads` and could miss regional Toolsets.
+5. Region enforcement did not cover reports or Verifier reads.
+6. No protocol-level live MCP manifest generator existed.
+7. Public Postman capability existence was conflated with project write authority.
+8. Real Hermes smoke depended on an unnecessary Operator Token.
+9. Deployment validation did not exercise the safest Web-only approval default.
 
-The executed paths included:
+All nine were corrected in this branch.
 
-- protected MCP endpoint behavior;
-- initialize/session/paginated discovery/schema/authority audit;
-- persistent report lifecycle and invalid-transition rejection;
-- attribution, stale/future and missing-data gates;
-- deterministic routine strategy;
-- Main/Executor/Verifier authority;
-- Compare-And-Set;
-- reservation races and outcome states;
-- durable Outbox and no mutation replay;
-- approval Hash/phrase/expiry/self-approval boundaries;
-- Campaign → Ad Group → Target → Ad ID binding and placeholder rendering;
-- single-entity writes with legitimate multi-condition Target expressions;
-- tamper and missing-ID quarantine;
+## Executed sandbox
+
+The current isolated execution is documented in `SANDBOX_EXECUTION_2026-08-04.md` and covers:
+
+- MCP initialize, Session and paginated discovery;
+- schema/authority/fingerprint checks;
+- all public capability-policy declarations;
+- NA/EU/FE Toolset discovery and read/job/write isolation;
+- report lifecycle and lineage;
+- attribution and data-quality gates;
+- deterministic routine optimization;
+- Main/Executor/Verifier permissions;
+- Compare-And-Set, atomic reservation and result states;
+- Outbox delivery without mutation replay;
+- approval Hash, phrase, expiry and self-approval prevention;
+- Campaign → Ad Group → Target → Ad ID binding;
+- single-entity mutation with valid multi-condition Target expressions;
+- tamper/missing-ID quarantine;
 - different-Session verification and mismatch handling;
 - Web login, Cookie, Origin and CSRF;
-- fallback-to-OBSERVE;
 - SQLite integrity, backup and restart.
 
-This proves the modeled protocol and state-machine behavior. It does not prove real Amazon response envelopes or real Hermes package execution inside GitHub Actions.
-
-## Repository full-sandbox gate
-
-Run from an actual checkout:
+From an actual checkout, run:
 
 ```bash
 bash scripts/run_full_sandbox.sh
 ```
 
-The script records `PASS`, `FAIL`, and `EXTERNAL` separately and produces:
-
-- `artifacts/full-sandbox/report.json`;
-- `artifacts/full-sandbox/report.md`;
-- Postman semantic manifest;
-- project capability-policy result;
-- MCP fixture/live manifests where available.
-
-Optional live MCP contract audit:
+Optional credentialed live MCP contract audit:
 
 ```bash
 FULL_SANDBOX_LIVE_MCP=1 \
@@ -221,26 +215,26 @@ AMAZON_ADS_MCP_ACCESS_TOKEN='...' \
 bash scripts/run_full_sandbox.sh
 ```
 
-The token is used only as an Authorization header and is never written to the manifest.
+The token is never written to generated manifests.
 
-## Remaining release blockers
+## Release blockers
 
-The following must pass with dated owner evidence before the PR leaves Draft:
+The PR must remain Draft until dated owner evidence exists for:
 
-1. Login with Amazon consent, token refresh and expiry recovery.
-2. Authenticated live MCP `initialize` and complete paginated `tools/list`.
-3. Live tool names, descriptions, Schemas, Schema hashes and regional source verification.
-4. NA/EU/FE Profile IDs, currencies and manager relationships for every enabled region.
-5. Real report submit, poll, GZIP download, parsing, attribution backfill and dedupe.
-6. Real 429 and timeout behavior without duplicate jobs or writes.
-7. Marketing Stream delivery through the owner's AWS resources.
-8. Test Account or tightly bounded Campaign hierarchy canary.
-9. Real Campaign, Ad Group, Target/Keyword and Ad response envelopes with unique ID binding.
-10. Different Hermes Verifier Session reading every object back from Amazon.
-11. Real Chromium approval flow on the deployed HTTPS origin.
-12. Pinned Hermes package load and CLI/Gateway/Cron/child interaction checks on every surface actually used.
-13. 2C2G memory/CPU/storage soak, reboot and systemd recovery.
-14. Backup restore and rollback drill.
-15. At least one mature attribution-window shadow evaluation before widening scope.
+1. OAuth consent, refresh and expiry recovery;
+2. authenticated live MCP initialize and every tools/list page;
+3. live Tool descriptions, Schemas, hashes and regional source;
+4. owner-supplied exact regional MCP endpoint mapping;
+5. real NA/EU/FE Profiles, currencies and manager relationships;
+6. real report submit, poll, GZIP download, parsing and attribution backfill;
+7. real 429 and timeout behavior without duplicate jobs or writes;
+8. Marketing Stream AWS delivery;
+9. Test Account or bounded Campaign hierarchy canary;
+10. real returned Campaign/Ad Group/Target/Keyword/Ad IDs;
+11. different Hermes Verifier Session reading every object from Amazon;
+12. real Chromium Web approval on the deployed HTTPS origin;
+13. pinned Hermes package load plus CLI/Gateway/Cron/child checks;
+14. 2C2G soak, reboot and systemd recovery;
+15. backup restore and a mature attribution-window shadow review.
 
-Until these pass, the accurate status is **production-candidate architecture with successful isolated simulation**, not “perfect production integration.”
+Accurate status: **production-candidate architecture with successful isolated simulation**, not perfect production certification.
