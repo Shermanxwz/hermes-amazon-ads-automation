@@ -55,7 +55,11 @@ def sync_live_catalog(force: bool = False) -> dict[str, Any]:
     global _CATALOG_SYNCED_AT, _CATALOG
     with _CATALOG_LOCK:
         if not force and _CATALOG and time.monotonic() - _CATALOG_SYNCED_AT < 300:
-            return {"cached": True, "tool_count": len(_CATALOG)}
+            return {
+                "cached": True,
+                "tool_count": len(_CATALOG),
+                "outbox_flush": _flush_result_outbox(),
+            }
         try:
             rows = _registry_catalog()
         except Exception as exc:
@@ -66,17 +70,17 @@ def sync_live_catalog(force: bool = False) -> dict[str, Any]:
         if not response.get("error"):
             _CATALOG = {row["registered_name"]: row for row in rows}
             _CATALOG_SYNCED_AT = time.monotonic()
-            _flush_result_outbox()
+            response["outbox_flush"] = _flush_result_outbox()
         return response
 
 
 def pre_llm_call(session_id=None, **kwargs):
     catalog = sync_live_catalog()
     runtime = resources.snapshot()
-    pending = outbox.pending_count()
+    outbox_state = outbox.maintenance()
     client.request("POST", "/api/agent/runtime-status", {
         "component": "hermes-plugin",
-        "state": {"resources": runtime, "result_outbox_pending": pending},
+        "state": {"resources": runtime, "result_outbox": outbox_state},
     }, timeout=5)
     state = client.context(session_id)
     if state.get("error"):
@@ -90,7 +94,7 @@ def pre_llm_call(session_id=None, **kwargs):
         "catalog_sync": catalog,
         "reports": state.get("reports"),
         "runtime_resources": runtime,
-        "result_outbox_pending": pending,
+        "result_outbox": outbox_state,
         "task_id": task.get("id") if task else None,
         "task_status": task.get("status") if task else None,
         "decisions": [
@@ -128,6 +132,12 @@ def pre_tool_call(tool_name, args, task_id="", tool_call_id=None, **kwargs):
     sync = sync_live_catalog()
     if sync.get("error"):
         return {"action": "block", "message": "Amazon Ads MCP catalog refresh is unavailable; operation failed closed"}
+    outbox_state = outbox.maintenance()
+    if outbox_state.get("over_limit"):
+        return {
+            "action": "block",
+            "message": "Amazon Ads durable result outbox reached its bounded safety limit; flush or repair it before new MCP operations",
+        }
     result = client.request("POST", "/api/agent/tool-check", {
         "tool_name": tool_name, "args": args or {}, "session_id": session_id, "tool_call_id": tool_call_id,
     })
