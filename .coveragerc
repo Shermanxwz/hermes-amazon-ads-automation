@@ -7,6 +7,12 @@ source =
     scripts
 omit =
     tests/*
+    # These standalone contract CLIs execute in the dedicated
+    # amazon-official-contract CI job against live downloaded/fixture inputs.
+    # Keeping them in the unit-test denominator would report them as 0% even
+    # though their release gate runs independently on every PR.
+    scripts/check_amazon_mcp_contract.py
+    scripts/check_project_capability_policy.py
 
 [report]
 show_missing = True
