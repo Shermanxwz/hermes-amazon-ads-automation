@@ -63,6 +63,16 @@ def install() -> None:
 
     original_get_approval = Store.get_approval
     original_create_approval_request = Store.create_approval_request
+    original_update_settings = Store.update_settings
+
+    def update_settings(self, updates: dict[str, Any]) -> dict[str, Any]:
+        # Safety invariants are controller-owned and read-only. Reject even an
+        # idempotent explicit write so generic settings forms cannot create the
+        # impression that an operator or model controls these boundaries.
+        locked = sorted(set(updates) & set(db_module.SAFETY_LOCKED_SETTINGS))
+        if locked:
+            raise ValueError(f"{locked[0]} is a locked safety invariant")
+        return original_update_settings(self, updates)
 
     def get_approval(self, approval_id: str) -> dict[str, Any] | None:
         item = original_get_approval(self, approval_id)
@@ -105,6 +115,7 @@ def install() -> None:
             self, task_id, actor, summary, ttl_minutes,
         )
 
+    Store.update_settings = update_settings
     Store.get_approval = get_approval
     Store.create_approval_request = create_approval_request
     _INSTALLED = True
