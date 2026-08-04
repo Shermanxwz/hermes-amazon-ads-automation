@@ -10,16 +10,14 @@ cd "$TMP/package-src"
 if python3 -c 'import setuptools.build_meta' >/dev/null 2>&1; then
   python3 -m pip wheel . --no-deps --no-build-isolation -w "$TMP/dist" >/dev/null
 else
-  # Minimal hosted Python images may omit setuptools from the runner environment.
-  # Let PEP 517 create an isolated build environment from pyproject.toml instead.
   python3 -m pip wheel . --no-deps -w "$TMP/dist" >/dev/null
 fi
 python3 -m venv "$TMP/installed"
 "$TMP/installed/bin/pip" install --no-deps "$TMP"/dist/*.whl >/dev/null
 "$TMP/installed/bin/amazon-ads-control" --help >/dev/null
-[[ "$("$TMP/installed/bin/amazon-ads-control" --version)" == *"2.1.0" ]]
+[[ "$("$TMP/installed/bin/amazon-ads-control" --version)" == *"3.0.0" ]]
 "$TMP/installed/bin/amazon-ads-worker" --help >/dev/null
-[[ "$("$TMP/installed/bin/amazon-ads-worker" --version)" == *"2.1.0" ]]
+[[ "$("$TMP/installed/bin/amazon-ads-worker" --version)" == *"3.0.0" ]]
 "$TMP/installed/bin/amazon-ads-backtest" --help >/dev/null
 export ADS_CONTROL_HOST=127.0.0.1 ADS_CONTROL_PORT=8790 ADS_CONTROL_DB="$TMP/state.db"
 export ADS_CONTROL_AGENT_TOKEN="$(python3 -c 'print("x"*48)')"
