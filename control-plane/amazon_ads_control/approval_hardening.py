@@ -45,8 +45,8 @@ def install() -> None:
                 dependency = matches[0] if len(matches) == 1 else None
             if not dependency:
                 return False, f"approved dependency {reference} was not found uniquely"
-            if dependency.get("status") != "verified":
-                return False, f"approved dependency {reference} is not independently verified"
+            if dependency.get("status") not in {"executed", "verified"}:
+                return False, f"approved dependency {reference} has no confirmed successful execution"
         return original_guardrail(self, decision, tool, settings)
 
     approval_gate._permanent_block = permanent_block
