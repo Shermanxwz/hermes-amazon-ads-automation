@@ -1,10 +1,10 @@
 {
   "package": "hermes-amazon-ads-automation",
-  "version": "2.1.0",
+  "version": "3.1.0",
   "scope": "Amazon advertising operations only",
   "runtime": {
     "control_plane": "Python 3.11+ standard library",
-    "database": "SQLite WAL",
+    "database": "SQLite WAL with periodic checkpoint, adaptive retention and safe reclaim",
     "hermes_contract": "v2026.7.7.2 / hermes-agent 0.18.2",
     "amazon_capability": "official Amazon Ads MCP plus public Advanced Tools contracts",
     "web": "responsive operational dashboard",
@@ -22,6 +22,8 @@
     "expired/partial/unknown write quarantine without blind replay",
     "atomic SQLite backup and integrity verification",
     "historical/shadow deterministic replay CLI",
+    "periodic adaptive retention, payload compaction, gzip snapshots and WAL reclaim",
+    "disk-pressure circuit breaker and bounded durable outbox artifacts",
     "browser, stress, deployment, quality and branch-coverage CI gates"
   ],
   "production_acceptance_required": [
@@ -31,6 +33,6 @@
     "owner AWS Marketing Stream delivery",
     "historical replay plus sustained OBSERVE shadow review",
     "Amazon Ads Test Account or controlled real-account canary with independent verifier readback",
-    "actual VPS HTTPS, reboot and backup-restore drill"
+    "actual VPS HTTPS, reboot, storage soak and backup-restore drill"
   ]
 }
