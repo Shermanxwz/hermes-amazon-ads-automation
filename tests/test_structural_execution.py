@@ -12,6 +12,7 @@ from amazon_ads_control.service import ControlService
 CREATE_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_create_campaign",
     "native_name": "campaign_management-create_campaign",
+    "source": "hermes-registry:na",
     "schema": {
         "description": "Create one campaign",
         "parameters": {
@@ -36,6 +37,7 @@ CREATE_CAMPAIGN = {
 CREATE_AD_GROUP = {
     "registered_name": "mcp_amazon_ads_ad_group_management_create_ad_group",
     "native_name": "ad_group_management-create_ad_group",
+    "source": "hermes-registry:na",
     "schema": {
         "description": "Create one ad group",
         "parameters": {
