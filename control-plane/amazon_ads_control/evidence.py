@@ -6,15 +6,15 @@ import math
 import re
 from typing import Any, Iterable
 
+_IDENTIFIER_KEYS = {
+    "id", "targetid", "keywordid", "campaignid", "adgroupid", "recommendationid",
+    "profileid", "portfolioid", "adid", "creativeid", "reportid",
+    "placement", "keywordtext", "searchterm", "matchtype",
+}
+
 
 def canonical_hash(value: Any) -> str:
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -48,10 +48,10 @@ def object_contains_scalar(obj: dict[str, Any], wanted: Any) -> bool:
     needle = str(wanted).strip().lower()
     if not needle:
         return True
-    for value in obj.values():
-        if isinstance(value, (str, int, float)) and str(value).strip().lower() == needle:
-            return True
-    return False
+    return any(
+        isinstance(value, (str, int, float)) and str(value).strip().lower() == needle
+        for value in obj.values()
+    )
 
 
 def _identifier_constraints(decision: dict[str, Any]) -> list[tuple[str, Any]]:
@@ -63,27 +63,34 @@ def _identifier_constraints(decision: dict[str, Any]) -> list[tuple[str, Any]]:
             "target_id|targetId|keyword_id|keywordId|campaign_id|campaignId|ad_group_id|adGroupId|recommendation_id|recommendationId|id",
             entity_id,
         ))
-    for aliases, wanted in (payload.get("match_fields") or {}).items() if isinstance(payload.get("match_fields"), dict) else []:
-        normalized = key_norm(str(aliases))
-        if any(token in normalized for token in ("id", "placement", "keywordtext", "searchterm", "matchtype")):
+    match_fields = payload.get("match_fields") if isinstance(payload.get("match_fields"), dict) else {}
+    for aliases, wanted in match_fields.items():
+        alias_keys = {key_norm(item) for item in str(aliases).split("|") if item.strip()}
+        if alias_keys & _IDENTIFIER_KEYS:
             constraints.append((str(aliases), wanted))
-    return constraints
+    # Preserve order while removing exact duplicate constraints.
+    seen: set[tuple[str, str]] = set()
+    unique: list[tuple[str, Any]] = []
+    for aliases, wanted in constraints:
+        key = (aliases, json.dumps(wanted, sort_keys=True, default=str))
+        if key not in seen:
+            seen.add(key)
+            unique.append((aliases, wanted))
+    return unique
 
 
 def object_matches_identifiers(obj: dict[str, Any], decision: dict[str, Any]) -> bool:
     constraints = _identifier_constraints(decision)
     if not constraints:
         return False
-    matched = 0
     for aliases, wanted in constraints:
         values = field_values(obj, aliases)
         if values and any(numeric_equal(item, wanted) for item in values):
-            matched += 1
-        elif aliases.startswith("target_id|") and object_contains_scalar(obj, wanted):
-            matched += 1
-        else:
-            return False
-    return matched == len(constraints)
+            continue
+        if aliases.startswith("target_id|") and object_contains_scalar(obj, wanted):
+            continue
+        return False
+    return True
 
 
 def expected_differences(expected: dict[str, Any], obj: dict[str, Any]) -> dict[str, Any]:
