@@ -99,7 +99,7 @@ def _expected_regions_for_args(store, args: dict[str, Any]) -> tuple[set[str], s
 def _tool_call_region_guard(store, tool: dict[str, Any], args: dict[str, Any], session_id: str | None):
     actual = tool_region(tool)
     if not actual:
-        return True, "Amazon MCP region is not explicitly tagged"
+        return False, "Amazon MCP tool is missing an explicit NA/EU/FE region tag"
     worker = store.worker_for_session(session_id)
     if worker:
         expected, error = _expected_regions_for_task(store, str(worker.get("task_id") or ""))
@@ -125,7 +125,7 @@ def _tool_call_region_guard(store, tool: dict[str, Any], args: dict[str, Any], s
 def _region_guard(store, decision: dict[str, Any], tool: dict[str, Any]) -> tuple[bool, str]:
     region = tool_region(tool)
     if not region:
-        return True, "Amazon MCP region is not explicitly tagged"
+        return False, "Amazon MCP tool is missing an explicit NA/EU/FE region tag"
     profile = store.get_profile(str(decision.get("profile_id") or ""))
     expected = profile_region(profile)
     if not expected:
@@ -139,13 +139,47 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    from .db import Store
     from .policy import redact
     from .service import ControlService
 
+    original_sync_catalog = Store.sync_catalog
     original_authorize = ControlService.authorize_tool
     original_guardrail = ControlService._guardrail_check
     original_create_plan = ControlService.create_managed_plan
     original_context = ControlService.context
+
+    def sync_catalog(self, tools):
+        previous_sources = {
+            tool.registered_name: str((self.get_tool(tool.registered_name) or {}).get("source") or "")
+            for tool in tools
+        }
+        result = original_sync_catalog(self, tools)
+        source_drift = sorted(
+            tool.registered_name
+            for tool in tools
+            if previous_sources.get(tool.registered_name)
+            and previous_sources[tool.registered_name] != str(tool.source or "")
+        )
+        if source_drift:
+            with self.connection() as conn:
+                placeholders = ",".join("?" for _ in source_drift)
+                conn.execute(
+                    f"UPDATE mcp_tools SET drifted=1 WHERE registered_name IN ({placeholders})",
+                    tuple(source_drift),
+                )
+            self.alert_once(
+                "critical",
+                "MCP_REGION_DRIFT",
+                None,
+                None,
+                None,
+                "Amazon Ads MCP tool region/source changed; affected tools remain blocked until reviewed",
+                {"tools": source_drift},
+            )
+            result = dict(result)
+            result["drifted"] = sorted(set(result.get("drifted") or []) | set(source_drift))
+        return result
 
     def authorize_tool(self, payload: dict[str, Any]):
         tool_name = str(payload.get("tool_name") or "")
@@ -213,9 +247,13 @@ def install() -> None:
             if not isinstance(action, dict):
                 continue
             tool = self.store.get_tool(str(action.get("tool_name") or ""))
+            if not tool:
+                continue
             region = tool_region(tool)
             if not region:
-                continue
+                raise ValueError(
+                    f"actions[{index}] uses an Amazon MCP tool without an explicit NA/EU/FE region tag"
+                )
             if not expected_region:
                 raise ValueError(
                     "managed structural plan profile requires a recognized country_code/marketplace for regional MCP routing"
@@ -237,10 +275,11 @@ def install() -> None:
         result["regional_mcp"] = {
             "tool_counts": dict(sorted(regions.items())),
             "profile_regions": profiles,
-            "policy": "reads, jobs and writes must use the Profile-matching NA/EU/FE MCP toolset",
+            "policy": "all Amazon Ads MCP tools require an explicit Profile-matching NA/EU/FE tag; untagged tools fail closed",
         }
         return result
 
+    Store.sync_catalog = sync_catalog
     ControlService.authorize_tool = authorize_tool
     ControlService._guardrail_check = guardrail
     ControlService.create_managed_plan = create_managed_plan
