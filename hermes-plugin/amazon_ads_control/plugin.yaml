@@ -5,9 +5,6 @@ requires_env:
   - name: ADS_CONTROL_AGENT_TOKEN
     description: Machine token used by Hermes tools and lifecycle hooks
     secret: true
-  - name: ADS_CONTROL_OPERATOR_TOKEN
-    description: Separate human-command token used only by explicit Hermes approval commands
-    secret: true
 provides_tools:
   - ads_control_sync_catalog
   - ads_control_create_report_job
