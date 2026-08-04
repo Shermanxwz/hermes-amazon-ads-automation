@@ -4,11 +4,12 @@ _INSTALLED = False
 
 
 def install() -> None:
-    """Apply defaults that are guaranteed by Hermes 0.18.x.
+    """Apply defaults guaranteed by the pinned Hermes 0.18.x integration.
 
     Hermes reliably supplies isolated child sessions and role markers. Per-child
-    model overrides are deployment/version dependent, so model diversity is an
-    optional hardening policy rather than a default availability requirement.
+    model overrides are deployment/version dependent, so model diversity remains
+    optional hardening. Black-box composite mutations stay disabled because the
+    controller now decomposes full-management plans into approved atomic actions.
     """
     global _INSTALLED
     if _INSTALLED:
@@ -22,6 +23,7 @@ def install() -> None:
         "executor_models": [],
         "verifier_models": [],
         "prefer_different_verifier_model": True,
+        "allow_approved_composite_workflows": False,
         "hermes_minimum_version": "0.18.2",
     })
     db_module.BOOLEAN_SETTINGS.add("prefer_different_verifier_model")
@@ -37,8 +39,10 @@ def install() -> None:
                 "required" if self.store.get_settings().get("require_different_verifier_model")
                 else "preferred_when_supported"
             ),
-            "command_approval": "feature-detected",
-            "fallback_policy": "observe when model identity is unavailable or untrusted",
+            "command_approval": "feature-detected-and-disabled-by-default",
+            "structural_execution": "approved atomic actions with deterministic Amazon ID binding",
+            "composite_workflows": "blocked; decompose into atomic approved actions",
+            "fallback_policy": "observe when Hermes reports a model fallback",
         }
         return result
 
