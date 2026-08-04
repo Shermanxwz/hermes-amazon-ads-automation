@@ -93,5 +93,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: python scripts/sync_official_contracts.py --check --output official/postman-capabilities.ci.json
+      - run: >-
+          python scripts/sync_official_contracts.py
+          --check
+          --strict-extended
+          --output official/postman-capabilities.ci.json
+      - run: >-
+          python scripts/check_official_fingerprint.py
+          --manifest official/postman-capabilities.ci.json
+          --baseline official/postman-semantic-baseline.json
       - run: python scripts/check_amazon_mcp_reachability.py
