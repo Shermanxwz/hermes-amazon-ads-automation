@@ -18,7 +18,8 @@ def main() -> int:
         shutil.copytree(ROOT / "hermes-plugin" / "amazon_ads_control", destination)
         (home / "config.yaml").write_text("plugins:\n  enabled:\n    - amazon-ads-control\n")
         os.environ["HERMES_HOME"] = str(home)
-        os.environ["ADS_CONTROL_AGENT_TOKEN"] = "test-" + "x" * 40
+        os.environ["ADS_CONTROL_AGENT_TOKEN"] = "agent-" + "x" * 48
+        os.environ["ADS_CONTROL_OPERATOR_TOKEN"] = "operator-" + "y" * 48
         os.environ["ADS_CONTROL_URL"] = "http://127.0.0.1:9"
 
         from hermes_cli.plugins import PluginManager
@@ -31,18 +32,38 @@ def main() -> int:
         assert loaded.enabled, loaded.error
         assert loaded.error is None, loaded.error
         expected_tools = {
-            "ads_control_sync_catalog", "ads_control_plan_cycle", "ads_control_create_task",
-            "ads_control_status", "ads_control_record_note", "ads_control_read_evidence", "ads_control_verify_decision",
-            "ads_control_finalize_task", "ads_control_ingest_stream_events",
+            "ads_control_sync_catalog",
+            "ads_control_create_report_job",
+            "ads_control_report_evidence",
+            "ads_control_transition_report",
+            "ads_control_plan_cycle",
+            "ads_control_create_task",
+            "ads_control_create_managed_plan",
+            "ads_control_request_approval",
+            "ads_control_status",
+            "ads_control_record_note",
+            "ads_control_prepare_write",
+            "ads_control_read_evidence",
+            "ads_control_verify_decision",
+            "ads_control_finalize_task",
+            "ads_control_ingest_stream_events",
+        }
+        expected_hooks = {
+            "pre_llm_call", "post_llm_call", "pre_tool_call", "post_tool_call",
+            "on_session_start", "on_session_end", "on_session_finalize", "on_session_reset",
+            "subagent_start", "subagent_stop",
         }
         assert expected_tools.issubset(set(loaded.tools_registered)), loaded.tools_registered
-        assert {"pre_llm_call", "pre_tool_call", "post_tool_call", "subagent_start", "subagent_stop"}.issubset(set(loaded.hooks_registered))
+        assert expected_hooks.issubset(set(loaded.hooks_registered)), loaded.hooks_registered
         for name in expected_tools:
             assert registry.get_schema(name), f"missing schema for {name}"
             entry = registry.get_entry(name)
             assert entry is not None, f"missing handler for {name}"
         skill = destination / "skill" / "SKILL.md"
-        assert skill.is_file() and "Independent" not in ""  # file existence is the runtime contract
+        assert skill.is_file()
+        text = skill.read_text(encoding="utf-8")
+        assert "Approval-Gated Full Autopilot" in text
+        assert "/ads-approve" in text
         print(f"real-hermes-smoke: OK ({len(expected_tools)} tools, {len(loaded.hooks_registered)} hooks)")
     return 0
 
