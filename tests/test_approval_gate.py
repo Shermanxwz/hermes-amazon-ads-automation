@@ -74,6 +74,7 @@ class ApprovalGateTests(unittest.TestCase):
                 "country_code": "US", "currency": "USD",
             },
             "actions": [{
+                "plan_key": "approved-sp-campaign",
                 "tool_name": CREATE_CAMPAIGN["registered_name"],
                 "action_type": "create_campaign",
                 "entity_type": "campaign",
@@ -144,8 +145,10 @@ class ApprovalGateTests(unittest.TestCase):
                 "title": "Forbidden account mutation",
                 "profile": {"profile_id": "p1"},
                 "actions": [{
+                    "plan_key": "forbidden-account",
                     "tool_name": ACCOUNT_WRITE["registered_name"],
                     "action_type": "update_account",
+                    "entity_id": "account:p1",
                     "arguments": {"name": "x"},
                     "expected_state": {"name": "x"},
                 }],
