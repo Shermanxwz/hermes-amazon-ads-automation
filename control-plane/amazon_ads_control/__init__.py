@@ -4,7 +4,7 @@ from .closed_loop import install as _install_closed_loop
 from .closed_loop_fixes import install as _install_closed_loop_fixes
 from .strategy_hardening import install as _install_strategy_hardening
 
-__version__ = "3.2.0"
+__version__ = "3.2.1"
 
 _install_closed_loop()
 _install_closed_loop_fixes()
@@ -25,6 +25,7 @@ from .regional_mcp import install as _install_regional_mcp
 from .approval_contract_fixes import install as _install_approval_contract_fixes
 from .hermes_compat import install as _install_hermes_compat
 from .hermes_lifecycle import install as _install_hermes_lifecycle
+from .verification_hardening import install as _install_verification_hardening
 _install_report_evidence_hardening()
 _install_callback_hardening()
 _install_task_hardening()
@@ -40,6 +41,7 @@ _install_regional_mcp()
 _install_approval_contract_fixes()
 _install_hermes_compat()
 _install_hermes_lifecycle()
+_install_verification_hardening()
 
 del _install_closed_loop, _install_closed_loop_fixes, _install_strategy_hardening
 del _install_report_evidence_hardening, _install_callback_hardening
@@ -49,3 +51,4 @@ del _install_structural_execution, _install_structural_hardening
 del _install_write_batch_hardening, _install_regional_mcp
 del _install_approval_contract_fixes
 del _install_hermes_compat, _install_hermes_lifecycle
+del _install_verification_hardening
