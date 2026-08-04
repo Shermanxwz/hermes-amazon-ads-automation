@@ -9,6 +9,9 @@ from urllib.request import Request, urlopen
 BASE_URL = os.getenv("ADS_CONTROL_URL", "http://127.0.0.1:8790").rstrip("/")
 TOKEN = os.getenv("ADS_CONTROL_AGENT_TOKEN", "")
 OPERATOR_TOKEN = os.getenv("ADS_CONTROL_OPERATOR_TOKEN", "")
+COMMAND_APPROVAL_ENABLED = os.getenv("ADS_CONTROL_ENABLE_COMMAND_APPROVAL", "").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 
 
 def _decode(raw):
@@ -52,6 +55,11 @@ def request(method, path, payload=None, timeout=4):
 
 
 def operator_request(method, path, payload=None, timeout=10):
+    if not COMMAND_APPROVAL_ENABLED:
+        return {
+            "error": "command_approval_disabled",
+            "detail": "Use the authenticated control Web. Enable command approval only in a restricted Hermes gateway without terminal/file/environment tools.",
+        }
     if not OPERATOR_TOKEN:
         return {"error": "operator_token_unavailable"}
     return _request(
