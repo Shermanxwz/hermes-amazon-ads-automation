@@ -95,12 +95,101 @@ def select_entity_scope(
     return entity, path
 
 
+def _field_aliases(field: str) -> set[str]:
+    return {_key(part) for part in field.split("|") if part.strip()}
+
+
+def _field_matches(key: str, aliases: set[str]) -> bool:
+    normalized = _key(key)
+    return any(normalized == alias or normalized.endswith(alias) for alias in aliases)
+
+
+def _nested_field_candidates(
+    value: Any,
+    aliases: set[str],
+    path: str = "$",
+) -> list[tuple[str, Any]]:
+    found: list[tuple[str, Any]] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child_path = f"{path}.{key}"
+            if _field_matches(str(key), aliases):
+                found.append((child_path, item))
+            if isinstance(item, (dict, list)):
+                found.extend(_nested_field_candidates(item, aliases, child_path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            if isinstance(item, (dict, list)):
+                found.extend(_nested_field_candidates(item, aliases, f"{path}[{index}]"))
+    return found
+
+
+def _value_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, (dict, list)) or isinstance(right, (dict, list)):
+        return left == right
+    from .service import _numeric_equal
+
+    return _numeric_equal(left, right)
+
+
+def scoped_expected_differences(
+    expected: dict[str, Any],
+    actual: dict[str, Any],
+) -> dict[str, Any]:
+    """Compare expected fields without combining values from nested siblings.
+
+    A direct field on the identified entity always wins. Nested fallback is
+    accepted only when exactly one matching path exists. Multiple matching paths
+    are ambiguous evidence and therefore fail closed even if one value happens
+    to equal the expectation.
+    """
+    differences: dict[str, Any] = {}
+    for field, wanted in expected.items():
+        aliases = _field_aliases(str(field))
+        if not aliases:
+            differences[str(field)] = {"expected": wanted, "actual": "[invalid field]"}
+            continue
+        direct = [
+            (f"$.{key}", item)
+            for key, item in actual.items()
+            if _field_matches(str(key), aliases)
+        ]
+        candidates = direct or _nested_field_candidates(actual, aliases)
+        if not candidates:
+            differences[str(field)] = {"expected": wanted, "actual": "[missing]"}
+            continue
+        if len(candidates) != 1:
+            differences[str(field)] = {
+                "expected": wanted,
+                "actual": "[ambiguous]",
+                "paths": [path for path, _item in candidates[:10]],
+            }
+            continue
+        path, observed = candidates[0]
+        if isinstance(wanted, dict) and isinstance(observed, dict):
+            nested = scoped_expected_differences(wanted, observed)
+            if nested:
+                differences[str(field)] = {
+                    "expected": wanted,
+                    "actual": observed,
+                    "path": path,
+                    "differences": nested,
+                }
+        elif not _value_equal(observed, wanted):
+            differences[str(field)] = {
+                "expected": wanted,
+                "actual": observed,
+                "path": path,
+            }
+    return differences
+
+
 def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
 
-    from .service import ControlService, _expected_differences, _family_matches
+    from .service import ControlService, _family_matches
 
     def verify_decision(self, payload: dict[str, Any]) -> dict[str, Any]:
         decision_id = str(payload.get("decision_id") or "").strip()
@@ -165,7 +254,7 @@ def install() -> None:
         if not isinstance(expected, dict) or not expected:
             field = str(decision_payload.get("field") or "")
             expected = {field: decision_payload.get("after")} if field else {}
-        differences = _expected_differences(expected, actual)
+        differences = scoped_expected_differences(expected, actual)
         status = "verified" if expected and not differences else "mismatch"
         default_message = (
             f"state matches at {evidence_path}"
