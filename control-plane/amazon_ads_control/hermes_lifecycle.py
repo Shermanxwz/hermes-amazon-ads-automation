@@ -29,7 +29,20 @@ def install() -> None:
             str(payload.get("provider") or "") or None,
             str(payload.get("surface") or "") or None,
         )
-        return {"recorded": True, "session_id": session_id, "state": state}
+        fallback = bool(payload.get("fallback") or payload.get("used_fallback") or payload.get("model_fallback"))
+        if fallback and self.store.get_settings().get("fallback_forces_observe", True):
+            self.store.update_settings({"mode": "observe", "execution_enabled": False})
+            self.store.alert_once(
+                "critical", "HERMES_MODEL_FALLBACK", None, None, None,
+                "Hermes reported a model fallback; Amazon Ads writes were disabled until operator review",
+                {
+                    "session_id": session_id,
+                    "model": payload.get("model"),
+                    "provider": payload.get("provider"),
+                    "surface": payload.get("surface"),
+                },
+            )
+        return {"recorded": True, "session_id": session_id, "state": state, "fallback": fallback}
 
     def context(self, session_id):
         result = original_context(self, session_id)
