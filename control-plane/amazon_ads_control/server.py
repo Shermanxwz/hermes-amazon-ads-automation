@@ -46,6 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "ok": True,
             "version": __version__,
             "database": integrity,
+            "storage": store.storage_status(),
             "expired_reservations_quarantined": len(expired),
             "report_counts": store.dashboard().get("reports", {}).get("counts", {}),
             "host": settings.host,
@@ -53,15 +54,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         }, ensure_ascii=False))
         return 0
 
-    deleted = store.purge_old(settings.retention_days)
+    try:
+        maintenance = store.maintain_storage(settings)
+    except Exception as exc:
+        maintenance = {"error": str(exc)}
+        store.alert_once(
+            "critical", "STORAGE_MAINTENANCE_FAILED", None, None, None,
+            "Initial storage maintenance failed; autonomous execution remains fail-closed on hard pressure",
+            {"error": str(exc)}, window_seconds=86400,
+        )
     store.event(
         "info", "controller.started", "controller", None,
         "Amazon Ads closed-loop control plane started",
-        {"retention_purge": deleted, "expired_reservations_quarantined": len(expired)},
+        {"storage_maintenance": maintenance, "expired_reservations_quarantined": len(expired)},
     )
     server = build_server(settings, store)
+    maintenance_stop = threading.Event()
+
+    def maintenance_loop() -> None:
+        while not maintenance_stop.wait(settings.maintenance_interval_seconds):
+            try:
+                store.maintain_storage(settings)
+            except Exception as exc:
+                store.alert_once(
+                    "critical", "STORAGE_MAINTENANCE_FAILED", None, None, None,
+                    "Periodic storage maintenance failed",
+                    {"error": str(exc)}, window_seconds=86400,
+                )
+
+    maintenance_thread = threading.Thread(
+        target=maintenance_loop,
+        name="storage-maintenance",
+        daemon=True,
+    )
+    maintenance_thread.start()
 
     def stop(*_args):
+        maintenance_stop.set()
         store.event("info", "controller.stopping", "controller", None, "Amazon Ads control plane stopping", {})
         threading.Thread(target=server.shutdown, name="control-plane-shutdown", daemon=True).start()
 
@@ -71,6 +100,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         server.serve_forever(poll_interval=0.5)
     finally:
+        maintenance_stop.set()
+        maintenance_thread.join(timeout=2)
         server.server_close()
     return 0
 
