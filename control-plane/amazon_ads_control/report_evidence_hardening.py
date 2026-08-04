@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import gzip
 import json
 import re
 from typing import Any
 
+from . import closed_loop as closed_loop_module
 from . import db as db_module
 from . import service as service_module
 from .evidence import canonical_hash
@@ -57,6 +59,26 @@ def _schema_fingerprint(snapshot: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _snapshot_bytes(snapshot: dict[str, Any]) -> bytes:
+    return json.dumps(
+        snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
+    ).encode("utf-8")
+
+
+def _stored_snapshot(row: Any) -> dict[str, Any] | None:
+    compressed = row["normalized_snapshot_gzip"] if "normalized_snapshot_gzip" in row.keys() else None
+    if compressed:
+        return json.loads(gzip.decompress(compressed).decode("utf-8"))
+    raw = row["normalized_snapshot_json"] if "normalized_snapshot_json" in row.keys() else None
+    return json.loads(raw) if raw else None
+
+
+def _action_result_hash(result: Any) -> str:
+    if isinstance(result, dict) and result.get("_compacted") and isinstance(result.get("sha256"), str):
+        return result["sha256"]
+    return canonical_hash(result)
+
+
 def install() -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -72,25 +94,44 @@ def install() -> None:
     original_store_transition = Store.transition_report
     original_transition = Service.transition_report
     original_validate_lineage = Store.validate_snapshot_lineage
+    original_report_dict = closed_loop_module._report_dict
+
+    def safe_report_dict(row):
+        item = original_report_dict(row)
+        raw = item.pop("normalized_snapshot_json", None)
+        compressed = item.pop("normalized_snapshot_gzip", None)
+        item["normalized_snapshot_stored"] = bool(raw or compressed)
+        item["normalized_snapshot_compressed_bytes"] = len(compressed) if compressed else 0
+        return item
 
     def init(self, path):
         original_init(self, path)
         with self.connection() as conn:
             db_module.Store._ensure_column(conn, "report_jobs", "normalized_snapshot_json", "TEXT")
+            db_module.Store._ensure_column(conn, "report_jobs", "normalized_snapshot_gzip", "BLOB")
 
     def store_transition(self, identifier: str, new_status: str, data: dict[str, Any], actor: str = "hermes-main"):
         data = dict(data or {})
         snapshot = data.get("snapshot")
+        compressed = None
+        persisted = dict(data)
         if str(new_status).upper() == "VALIDATED" and isinstance(snapshot, dict):
+            encoded = _snapshot_bytes(snapshot)
+            compressed = gzip.compress(encoded, compresslevel=6)
             data["normalized_hash"] = snapshot_hash(snapshot)
             data["schema_hash"] = canonical_hash(data.get("schema") or _schema_fingerprint(snapshot))
             data["row_count"] = _row_count(snapshot)
-        result = original_store_transition(self, identifier, new_status, data, actor)
-        if str(new_status).upper() == "VALIDATED" and isinstance(snapshot, dict):
+            persisted = dict(data)
+            persisted.pop("snapshot", None)
+            persisted["snapshot_sha256"] = hashlib_sha256(encoded)
+            persisted["snapshot_original_bytes"] = len(encoded)
+            persisted["snapshot_compressed_bytes"] = len(compressed)
+        result = original_store_transition(self, identifier, new_status, persisted, actor)
+        if compressed is not None:
             with self.connection() as conn:
                 conn.execute(
-                    "UPDATE report_jobs SET normalized_snapshot_json=? WHERE id=?",
-                    (json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str), result["id"]),
+                    "UPDATE report_jobs SET normalized_snapshot_json=NULL,normalized_snapshot_gzip=? WHERE id=?",
+                    (compressed, result["id"]),
                 )
             result = self.get_report_job(result["id"]) or result
         return result
@@ -150,7 +191,7 @@ def install() -> None:
             elif known and known not in ids:
                 raise ValueError("report evidence does not contain the persistent report ID")
             data["evidence_action_id"] = action_id
-            data["evidence_hash"] = canonical_hash(action["result"])
+            data["evidence_hash"] = _action_result_hash(action["result"])
             if status == "DOWNLOADED":
                 data["content_hash"] = data["evidence_hash"]
         if status == "VALIDATED":
@@ -160,8 +201,11 @@ def install() -> None:
         if status == "INGESTED":
             current = self.store.get_report_job(job["id"]) or {}
             with self.store.connection() as conn:
-                row = conn.execute("SELECT normalized_snapshot_json FROM report_jobs WHERE id=?", (job["id"],)).fetchone()
-            if not row or not row["normalized_snapshot_json"]:
+                row = conn.execute(
+                    "SELECT normalized_snapshot_json,normalized_snapshot_gzip FROM report_jobs WHERE id=?",
+                    (job["id"],),
+                ).fetchone()
+            if not row or _stored_snapshot(row) is None:
                 raise ValueError("INGESTED report requires a previously validated normalized snapshot")
             data.update({
                 "content_hash": current.get("content_hash"),
@@ -178,20 +222,30 @@ def install() -> None:
 
     def validate_snapshot_lineage(self, snapshot: dict[str, Any], lineage: dict[str, Any]):
         normalized = original_validate_lineage(self, snapshot, lineage)
-        serialized = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)
+        serialized = _snapshot_bytes(snapshot)
         with self.connection() as conn:
             for job_id in normalized["report_job_ids"]:
-                row = conn.execute("SELECT normalized_snapshot_json FROM report_jobs WHERE id=?", (job_id,)).fetchone()
-                if not row or not row["normalized_snapshot_json"]:
+                row = conn.execute(
+                    "SELECT normalized_snapshot_json,normalized_snapshot_gzip FROM report_jobs WHERE id=?",
+                    (job_id,),
+                ).fetchone()
+                stored = _stored_snapshot(row) if row else None
+                if stored is None:
                     raise ValueError("snapshot lineage report has no controller-stored normalized snapshot")
-                stored = json.loads(row["normalized_snapshot_json"])
-                if json.dumps(stored, ensure_ascii=False, sort_keys=True, default=str) != serialized:
+                if _snapshot_bytes(stored) != serialized:
                     raise ValueError("submitted snapshot differs from the controller-stored report snapshot")
         return normalized
 
+    closed_loop_module._report_dict = safe_report_dict
     Store.__init__ = init
     Store.transition_report = store_transition
     Store.validate_snapshot_lineage = validate_snapshot_lineage
     Service.report_evidence = report_evidence
     Service.transition_report = transition_report
     _INSTALLED = True
+
+
+def hashlib_sha256(value: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(value).hexdigest()
