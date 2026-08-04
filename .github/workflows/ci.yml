@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   apply-source:
-    if: ${{ hashFiles('.bootstrap/hermes-v2.1-source.tar.gz') != '' }}
+    if: ${{ hashFiles('.bootstrap/chunk-*') != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -21,9 +21,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "99bbdde928219817eead83b1fb9845fdc0a3b9c0594152869592c1b99453a012  .bootstrap/hermes-v2.1-source.tar.gz" | sha256sum -c -
+          cat .bootstrap/chunk-* | base64 -d > "$RUNNER_TEMP/hermes-v2.1-source.tar.gz"
+          echo "99bbdde928219817eead83b1fb9845fdc0a3b9c0594152869592c1b99453a012  $RUNNER_TEMP/hermes-v2.1-source.tar.gz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/v21"
-          tar -xzf .bootstrap/hermes-v2.1-source.tar.gz -C "$RUNNER_TEMP/v21"
+          tar -xzf "$RUNNER_TEMP/hermes-v2.1-source.tar.gz" -C "$RUNNER_TEMP/v21"
           rsync -a --delete --exclude '.git' --exclude '.github/workflows/ci.yml' "$RUNNER_TEMP/v21/" ./
           rm -rf .bootstrap
       - name: Commit source
