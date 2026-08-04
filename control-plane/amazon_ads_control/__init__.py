@@ -10,12 +10,15 @@ _install_closed_loop()
 _install_closed_loop_fixes()
 _install_strategy_hardening()
 
+from .report_evidence_hardening import install as _install_report_evidence_hardening
 from .callback_hardening import install as _install_callback_hardening
 from .task_hardening import install as _install_task_hardening
 from .api_extension import install as _install_api_extension
+_install_report_evidence_hardening()
 _install_callback_hardening()
 _install_task_hardening()
 _install_api_extension()
 
 del _install_closed_loop, _install_closed_loop_fixes, _install_strategy_hardening
-del _install_callback_hardening, _install_task_hardening, _install_api_extension
+del _install_report_evidence_hardening, _install_callback_hardening
+del _install_task_hardening, _install_api_extension
