@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import re
 from typing import Any
 
 _INSTALLED = False
@@ -18,6 +19,7 @@ _REGION_COUNTRIES = {
         "IL", "EG", "MA", "BH", "KW", "QA", "ZA",
     },
 }
+_PROFILE_KEYS = {"profileid", "advertisingprofileid", "advertiserprofileid"}
 
 
 def profile_region(profile: dict[str, Any] | None) -> str | None:
@@ -44,6 +46,82 @@ def tool_region(tool: dict[str, Any] | None) -> str | None:
     return None
 
 
+def _key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def _profile_ids(value: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if _key(str(key)) in _PROFILE_KEYS and isinstance(item, (str, int)) and str(item).strip():
+                found.add(str(item).strip())
+            found.update(_profile_ids(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(_profile_ids(item))
+    return found
+
+
+def _expected_regions_for_task(store, task_id: str) -> tuple[set[str], str | None]:
+    regions: set[str] = set()
+    for decision in store.list_decisions(task_id=task_id, limit=500):
+        profile = store.get_profile(str(decision.get("profile_id") or ""))
+        region = profile_region(profile)
+        if not region:
+            return set(), "task contains a Profile whose marketplace cannot be mapped to NA/EU/FE"
+        regions.add(region)
+    if not regions:
+        return set(), "task has no Profile-bound decisions"
+    if len(regions) > 1:
+        return set(), "one task cannot span multiple Amazon Ads MCP regions"
+    return regions, None
+
+
+def _expected_regions_for_args(store, args: dict[str, Any]) -> tuple[set[str], str | None]:
+    identifiers = _profile_ids(args)
+    if not identifiers:
+        return set(), None
+    regions: set[str] = set()
+    for profile_id in identifiers:
+        profile = store.get_profile(profile_id)
+        if not profile:
+            return set(), f"Profile {profile_id} is not registered in the control plane"
+        region = profile_region(profile)
+        if not region:
+            return set(), f"Profile {profile_id} marketplace cannot be mapped to NA/EU/FE"
+        regions.add(region)
+    if len(regions) > 1:
+        return set(), "one MCP call cannot span Profiles from multiple regions"
+    return regions, None
+
+
+def _tool_call_region_guard(store, tool: dict[str, Any], args: dict[str, Any], session_id: str | None):
+    actual = tool_region(tool)
+    if not actual:
+        return True, "Amazon MCP region is not explicitly tagged"
+    worker = store.worker_for_session(session_id)
+    if worker:
+        expected, error = _expected_regions_for_task(store, str(worker.get("task_id") or ""))
+    else:
+        expected, error = _expected_regions_for_args(store, args)
+    if error:
+        return False, error
+    if not expected:
+        semantic = str(tool.get("semantic") or "unknown")
+        family = str(tool.get("family") or "")
+        # Account/Profile discovery is the only regional call allowed before a
+        # concrete Profile exists locally. All stateful jobs/writes and scoped
+        # entity reads must carry a known Profile or a bound task.
+        if semantic == "read" and family in {"profile", "account_admin"}:
+            return True, f"regional {actual} account/Profile discovery"
+        return False, "regional Amazon MCP call requires a known Profile ID or a Profile-bound task"
+    expected_region = next(iter(expected))
+    if expected_region != actual:
+        return False, f"Profile requires Amazon Ads MCP region {expected_region}, but tool belongs to {actual}"
+    return True, f"Profile and Amazon Ads MCP tool both use region {actual}"
+
+
 def _region_guard(store, decision: dict[str, Any], tool: dict[str, Any]) -> tuple[bool, str]:
     region = tool_region(tool)
     if not region:
@@ -51,21 +129,72 @@ def _region_guard(store, decision: dict[str, Any], tool: dict[str, Any]) -> tupl
     profile = store.get_profile(str(decision.get("profile_id") or ""))
     expected = profile_region(profile)
     if not expected:
-        return False, "profile marketplace cannot be mapped to an Amazon Ads MCP region"
+        return False, "Profile marketplace cannot be mapped to an Amazon Ads MCP region"
     if expected != region:
-        return False, f"profile requires Amazon Ads MCP region {expected}, but tool belongs to {region}"
-    return True, f"profile and Amazon Ads MCP tool both use region {region}"
+        return False, f"Profile requires Amazon Ads MCP region {expected}, but tool belongs to {region}"
+    return True, f"Profile and Amazon Ads MCP tool both use region {region}"
 
 
 def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    from .policy import redact
     from .service import ControlService
 
+    original_authorize = ControlService.authorize_tool
     original_guardrail = ControlService._guardrail_check
     original_create_plan = ControlService.create_managed_plan
     original_context = ControlService.context
+
+    def authorize_tool(self, payload: dict[str, Any]):
+        tool_name = str(payload.get("tool_name") or "")
+        tool = self.store.get_tool(tool_name)
+        args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        session_id = str(payload.get("session_id") or payload.get("task_id") or "") or None
+        if tool:
+            allowed, reason = _tool_call_region_guard(self.store, tool, args, session_id)
+            if not allowed:
+                worker = self.store.worker_for_session(session_id)
+                actor_role = worker.get("role") if worker else "main"
+                task_id = worker.get("task_id") if worker else None
+                action_id = self.store.record_action(
+                    decision_id=None,
+                    task_id=str(task_id) if task_id else None,
+                    session_id=session_id,
+                    tool_call_id=str(payload.get("tool_call_id") or "") or None,
+                    actor_role=str(actor_role),
+                    phase="before",
+                    tool_name=tool_name,
+                    operation=str(tool.get("semantic") or "unknown"),
+                    allowed=False,
+                    args=redact(args),
+                    reason=reason,
+                )
+                self.store.event(
+                    "warning",
+                    "tool.region_blocked",
+                    str(actor_role),
+                    str(task_id) if task_id else None,
+                    f"Blocked {tool_name}: {reason}",
+                    {"action_id": action_id, "tool_region": tool_region(tool)},
+                )
+                return {
+                    "allowed": False,
+                    "reason": reason,
+                    "operation": str(tool.get("semantic") or "unknown"),
+                    "actor_role": actor_role,
+                    "task_id": task_id,
+                    "action_id": action_id,
+                    "decision_id": None,
+                    "plan_key": None,
+                    "reservation_token": None,
+                    "tool": {
+                        key: tool.get(key)
+                        for key in ("native_name", "family", "risk", "schema_hash", "source")
+                    },
+                }
+        return original_authorize(self, payload)
 
     def guardrail(self, decision, tool, settings):
         allowed, reason = original_guardrail(self, decision, tool, settings)
@@ -108,10 +237,11 @@ def install() -> None:
         result["regional_mcp"] = {
             "tool_counts": dict(sorted(regions.items())),
             "profile_regions": profiles,
-            "write_policy": "profile region must exactly match the MCP tool region",
+            "policy": "reads, jobs and writes must use the Profile-matching NA/EU/FE MCP toolset",
         }
         return result
 
+    ControlService.authorize_tool = authorize_tool
     ControlService._guardrail_check = guardrail
     ControlService.create_managed_plan = create_managed_plan
     ControlService.context = context
