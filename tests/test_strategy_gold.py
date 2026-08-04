@@ -8,6 +8,7 @@ from amazon_ads_control.strategy import OptimizationEngine, StrategyPolicy
 from helpers import one_target_snapshot
 
 UTC = timezone.utc
+PRODUCT = "SPONSORED_PRODUCTS"
 
 
 class GoldStrategyTests(unittest.TestCase):
@@ -47,12 +48,12 @@ class GoldStrategyTests(unittest.TestCase):
         snapshot = one_target_snapshot()
         snapshot["targets"] = []
         snapshot["campaigns"] = [{
-            "campaign_id": "c1", "state": "ENABLED", "budget": 100,
+            "campaign_id": "c1", "ad_product": PRODUCT, "state": "ENABLED", "budget": 100,
             "clicks": 50, "spend": 90, "sales": 100, "orders": 4,
         }]
         snapshot["budget_usage"] = [{"campaign_id": "c1", "budget_usage_percent": 90}]
         snapshot["placements"] = [{
-            "campaign_id": "c1", "placement": "PRODUCT_PAGES",
+            "campaign_id": "c1", "ad_product": PRODUCT, "placement": "PRODUCT_PAGES",
             "adjustment_percent": 30, "clicks": 50, "spend": 90,
             "sales": 100, "orders": 4,
         }]
