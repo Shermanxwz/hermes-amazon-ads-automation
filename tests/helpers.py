@@ -75,11 +75,12 @@ class Environment:
         self.store = Store(Path(self.temp.name) / "state.db")
         self.service = ControlService(self.store)
         if not strict_writes:
-            # Legacy tests isolate catalog/role/reservation behavior. Dedicated v3
-            # tests exercise the mandatory pre-write CAS with this setting enabled.
+            # Legacy unit tests isolate one historical invariant at a time. The
+            # dedicated v3 suite leaves all production defaults enabled.
             with self.store.connection() as conn:
                 conn.execute(
-                    "UPDATE settings SET value='false' WHERE key='require_prewrite_read'"
+                    "UPDATE settings SET value='false' WHERE key IN "
+                    "('require_prewrite_read','require_snapshot_lineage','require_result_event_id')"
                 )
 
     def close(self):
