@@ -35,6 +35,8 @@ class HttpV2Tests(unittest.TestCase):
         self.assertEqual(self.request("/health/live")[0],200)
         with build_opener().open(self.base+"/") as r: html=r.read().decode()
         self.assertIn("确定性策略",html); self.assertIn("独立验证",html)
+        self.assertIn("本页怎么理解",html); self.assertIn("Main 主控",html); self.assertIn("仅观察",html)
+        self.assertIn("确认新 Schema",html); self.assertIn("Verifier 必须是不同的只读子代理",html)
 
     def test_browser_auth_csrf_and_dashboard(self):
         self.assertEqual(self.request("/api/dashboard")[0],401); self.login()
