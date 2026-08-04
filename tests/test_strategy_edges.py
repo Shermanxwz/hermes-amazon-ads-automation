@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
 import unittest
 
 from amazon_ads_control.strategy import OptimizationEngine, StrategyPolicy
 from helpers import one_target_snapshot
 
-UTC = timezone.utc
+PRODUCT = "SPONSORED_PRODUCTS"
 
 
 class StrategyEdgeTests(unittest.TestCase):
@@ -39,8 +38,8 @@ class StrategyEdgeTests(unittest.TestCase):
     def test_same_search_term_in_two_ad_groups_is_not_collapsed(self):
         s = one_target_snapshot(); s["targets"] = []
         s["search_terms"] = [
-            {"search_term": "shoe", "campaign_id": "c", "ad_group_id": "g1", "clicks": 15, "spend": 25, "sales": 0, "orders": 0},
-            {"search_term": "shoe", "campaign_id": "c", "ad_group_id": "g2", "clicks": 15, "spend": 25, "sales": 0, "orders": 0},
+            {"search_term": "shoe", "campaign_id": "c", "ad_group_id": "g1", "ad_product": PRODUCT, "clicks": 15, "spend": 25, "sales": 0, "orders": 0},
+            {"search_term": "shoe", "campaign_id": "c", "ad_group_id": "g2", "ad_product": PRODUCT, "clicks": 15, "spend": 25, "sales": 0, "orders": 0},
         ]
         decisions = self.engine.plan(s, self.policy).decisions
         self.assertEqual(len(decisions), 2)
@@ -54,7 +53,7 @@ class StrategyEdgeTests(unittest.TestCase):
 
     def test_zero_placement_adjustment_can_scale(self):
         s = one_target_snapshot(); s["targets"] = []
-        s["placements"] = [{"campaign_id": "c", "placement": "TOP_OF_SEARCH", "adjustment_percent": 0, "clicks": 20, "spend": 10, "sales": 100, "orders": 3}]
+        s["placements"] = [{"campaign_id": "c", "ad_product": PRODUCT, "placement": "TOP_OF_SEARCH", "adjustment_percent": 0, "clicks": 20, "spend": 10, "sales": 100, "orders": 3}]
         decisions = self.engine.plan(s, self.policy).decisions
         self.assertEqual(decisions[0].rule_id, "ADS-PLACEMENT-TOS-SCALE")
         self.assertEqual(decisions[0].payload["before"], 0)
