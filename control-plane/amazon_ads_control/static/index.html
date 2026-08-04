@@ -32,6 +32,9 @@
         <span id="execution-pill">—</span>
         <span id="catalog-pill">—</span>
         <span id="alerts-pill">—</span>
+        <span id="report-pill">报告 —</span>
+        <span id="callback-pill">回调 —</span>
+        <span id="resource-pill">资源 —</span>
       </section>
       <p id="mode-help" class="mode-help" aria-live="polite">—</p>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
@@ -48,13 +51,13 @@
           <section>
             <h3>角色分工</h3>
             <p><strong>Main 主控：</strong>采集数据、调用确定性策略、建任务和委派，不能写广告。</p>
-            <p><strong>Executor 执行器：</strong>只能执行绑定任务中的单实体计划，不能自行扩展范围。</p>
-            <p><strong>Verifier 验证器：</strong>只读重新查询 Amazon，不能修改广告，也不信任执行器自报结果。</p>
+            <p><strong>Executor 执行器：</strong>只能执行绑定任务中的单实体计划，写前必须重新读取并匹配原值。</p>
+            <p><strong>Verifier 验证器：</strong>只读重新查询 Amazon，只在同一实体对象内核对全部预期字段。</p>
           </section>
           <section>
             <h3>判断原则</h3>
-            <p>LLM 负责解释和编排；真正可执行的变化必须来自成熟数据和确定性规则。</p>
-            <p>数据过旧、归因未成熟、Schema 漂移或结果无法确认时，系统会停止写入并记录原因。</p>
+            <p>LLM 负责解释和编排；真正可执行的变化必须来自已入库报告、成熟数据和确定性规则。</p>
+            <p>数据过旧、归因未成熟、报告血缘缺失、Schema 漂移或结果无法确认时，系统会停止写入并记录原因。</p>
           </section>
         </div>
       </details>
@@ -70,17 +73,21 @@
       </nav>
 
       <section id="overview" class="tab active">
-        <p class="tab-help">查看最近广告数据周期、主控创建的任务、Executor/Verifier 状态和系统运行记录。</p>
+        <p class="tab-help">查看广告数据周期、持久报告、主控任务、Executor/Verifier 状态和系统运行记录。</p>
         <div class="grid two">
-          <article class="card"><h2>最近周期</h2><p class="section-help">每一行代表一次广告数据快照和确定性策略计算；“决策”是本周期产生的候选动作数量。</p><div id="cycles"></div></article>
-          <article class="card"><h2>任务与 Worker</h2><p class="section-help">任务由 Main 创建；Executor 执行计划，Verifier 在不同会话中独立读回。Worker 角色由系统自动识别，不能在 Web 中手动冒充。</p><div id="tasks"></div><div id="workers"></div></article>
+          <article class="card"><h2>最近周期</h2><p class="section-help">每一行代表一次带报告血缘的广告数据快照和确定性策略计算；没有血缘的孤儿周期不能创建执行任务。</p><div id="cycles"></div></article>
+          <article class="card"><h2>任务与 Worker</h2><p class="section-help">任务由 Main 创建；Executor 写前 Compare-And-Set，Verifier 在不同会话中独立读回。</p><div id="tasks"></div><div id="workers"></div></article>
+        </div>
+        <div class="grid two">
+          <article class="card"><h2>报告生命周期</h2><p class="section-help">展示稳定 Report Key 的提交、下载、校验、入库、失败隔离和显式重试记录。</p><div id="reports"></div></article>
+          <article class="card"><h2>运行与补投状态</h2><p class="section-help">展示 cgroup 实际资源档位和 Durable Outbox 待补投数量；这里只告知，不要求日常审批。</p><div id="runtime-status"></div></article>
         </div>
         <article class="card"><h2>系统事件</h2><p class="section-help">记录模式变化、任务生命周期、工具阻断、数据质量和安全事件，用于解释系统为何执行或停止。</p><div id="events"></div></article>
       </section>
 
       <section id="decisions" class="tab"><p class="tab-help">这里展示策略引擎基于实际广告数据生成的计划。决策不等于已经执行，只有满足全部安全条件后才会被 Executor 领取。</p><article class="card"><h2>确定性策略决策</h2><p class="section-help">“原因”说明命中的规则与证据；“计划”保存实体、修改前后值、预期状态和匹配字段。</p><div id="decision-list"></div></article></section>
-      <section id="changes" class="tab"><p class="tab-help">先看 Executor 的真实工具调用和结构化返回，再看独立 Verifier 是否从 Amazon 读到了预期状态。</p><article class="card"><h2>工具调用与结构化结果</h2><p class="section-help">记录调用前授权、调用后结果、允许或阻断原因。部分成功、异步处理中和未知响应不会被误记为已完成。</p><div id="actions"></div></article><article class="card"><h2>独立 Verifier 读回</h2><p class="section-help">Verifier 必须是不同的只读子代理；只有实际状态与计划一致，决策才会标记为 verified。</p><div id="verifications"></div></article></section>
-      <section id="alerts" class="tab"><p class="tab-help">异常不会自动消失。先处理关键异常，再恢复自动运营；严重异常会让写入 fail-closed。</p><article class="card"><h2>需要关注</h2><p class="section-help">包括 MCP Schema 漂移、工具消失、预算接近耗尽、广告失去资格、执行结果未确认和验证不一致。</p><div id="alert-list"></div></article></section>
+      <section id="changes" class="tab"><p class="tab-help">先看 Executor 的真实工具调用和结构化返回，再看独立 Verifier 是否从 Amazon 读到了预期状态。</p><article class="card"><h2>工具调用与结构化结果</h2><p class="section-help">记录调用前授权、调用后结果、允许或阻断原因。部分成功、异步处理中和未知响应不会被误记为已完成。</p><div id="actions"></div></article><article class="card"><h2>独立 Verifier 读回</h2><p class="section-help">Verifier 必须是不同的只读子代理；只有唯一实体对象的实际状态与计划一致，决策才会标记为 verified。</p><div id="verifications"></div></article></section>
+      <section id="alerts" class="tab"><p class="tab-help">异常不会自动消失。先处理关键异常，再恢复自动运营；严重异常会让写入 fail-closed。</p><article class="card"><h2>需要关注</h2><p class="section-help">包括报告失败/隔离、MCP Schema 漂移、工具消失、预算暴露、执行结果未确认和验证不一致。</p><div id="alert-list"></div></article></section>
       <section id="profiles" class="tab">
         <p class="tab-help">管理广告 Profile 的核心目标，并查看 Hermes 当前真实发现的 Amazon Ads MCP 工具合同。</p>
         <div class="grid two">
@@ -95,10 +102,11 @@
             </form>
           </article>
         </div>
-        <article class="card"><h2>Amazon Ads MCP 工具目录</h2><p class="section-help">目录来自 Hermes 实时注册表，不是项目猜测的静态名单。Schema 哈希变化时写入会暂停；“确认新 Schema”仅表示你已核对合同变化，不代表自动放宽其他安全规则。</p><div id="catalog"></div><div id="catalog-tools"></div></article>
+        <article class="card"><h2>Amazon Ads MCP 工具目录</h2><p class="section-help">目录来自 Hermes 实时注册表；控制面重新推导语义、族和风险。Schema 哈希变化时写入会暂停。</p><div id="catalog"></div><div id="catalog-tools"></div></article>
       </section>
     </section>
   </main>
   <script src="/static/app.js"></script>
+  <script src="/static/app_v3.js"></script>
 </body>
 </html>
