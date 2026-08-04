@@ -15,10 +15,14 @@ delegation:
   max_iterations: 35
 
 # Amazon Ads official remote MCP is the data/execution capability surface.
-# Keep one canonical server name: Hermes registers tools as mcp_amazon_ads_*.
+# Set AMAZON_ADS_MCP_URL to the exact endpoint supplied by Amazon/onboarding.
+# The public open-beta page confirms global availability but does not publish
+# separate EU/FE MCP hostnames. Never guess a regional hostname.
+# Also set ADS_MCP_DEFAULT_REGION=na|eu|fe in the Hermes service environment;
+# this binds the canonical mcp-amazon-ads toolset to the Profile region.
 mcp_servers:
   amazon-ads:
-    url: https://advertising-ai.amazon.com/mcp
+    url: ${AMAZON_ADS_MCP_URL}
     auth: oauth
     enabled: true
     connect_timeout: 60
@@ -33,6 +37,8 @@ mcp_servers:
     # oauth:
     #   client_id: ${AMAZON_ADS_MCP_CLIENT_ID}
     #   client_secret: ${AMAZON_ADS_MCP_CLIENT_SECRET}
+    #   scope: advertising::campaign_management
+    #   redirect_port: 0
 
 # Enable only the toolsets needed by the daily cron session.
 cron:
