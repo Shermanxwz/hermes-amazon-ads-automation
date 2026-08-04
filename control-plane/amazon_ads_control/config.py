@@ -43,6 +43,14 @@ class Settings:
     max_sessions: int
     retention_days: int
     allow_remote_bind: bool
+    maintenance_interval_seconds: int = 21600
+    payload_retention_days: int = 30
+    metric_retention_days: int = 60
+    snapshot_retention_days: int = 45
+    storage_soft_limit_mb: int = 512
+    storage_hard_limit_mb: int = 1024
+    min_free_disk_mb: int = 1024
+    vacuum_min_reclaim_mb: int = 64
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -72,6 +80,14 @@ class Settings:
             max_sessions=_int("ADS_CONTROL_MAX_SESSIONS", 8, 1, 64),
             retention_days=_int("ADS_CONTROL_RETENTION_DAYS", 180, 7, 3650),
             allow_remote_bind=allow_remote,
+            maintenance_interval_seconds=_int("ADS_CONTROL_MAINTENANCE_INTERVAL", 21600, 900, 86400),
+            payload_retention_days=_int("ADS_CONTROL_PAYLOAD_RETENTION_DAYS", 30, 7, 3650),
+            metric_retention_days=_int("ADS_CONTROL_METRIC_RETENTION_DAYS", 60, 7, 3650),
+            snapshot_retention_days=_int("ADS_CONTROL_SNAPSHOT_RETENTION_DAYS", 45, 7, 3650),
+            storage_soft_limit_mb=_int("ADS_CONTROL_STORAGE_SOFT_LIMIT_MB", 512, 64, 102400),
+            storage_hard_limit_mb=_int("ADS_CONTROL_STORAGE_HARD_LIMIT_MB", 1024, 128, 204800),
+            min_free_disk_mb=_int("ADS_CONTROL_MIN_FREE_DISK_MB", 1024, 128, 1048576),
+            vacuum_min_reclaim_mb=_int("ADS_CONTROL_VACUUM_MIN_RECLAIM_MB", 64, 16, 102400),
         )
 
     def validate_runtime(self) -> None:
@@ -83,3 +99,5 @@ class Settings:
                 "ADS_CONTROL_PASSWORD_HASH is missing or invalid; generate it with "
                 "python scripts/control_cli.py hash-password"
             )
+        if self.storage_hard_limit_mb <= self.storage_soft_limit_mb:
+            raise ValueError("ADS_CONTROL_STORAGE_HARD_LIMIT_MB must be greater than the soft limit")
