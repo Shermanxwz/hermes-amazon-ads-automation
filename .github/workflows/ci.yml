@@ -1,9 +1,7 @@
 name: Apply v2.1 hardening patch
 
 on:
-  push:
-    branches:
-      - agent/hermes-amazon-ads-autopilot
+  pull_request:
 
 permissions:
   contents: write
