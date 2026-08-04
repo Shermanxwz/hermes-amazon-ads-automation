@@ -87,6 +87,46 @@ def _extract_created_id(action_type: str, result: Any) -> str | None:
     return next(iter(candidates)) if len(candidates) == 1 else None
 
 
+def _update_payload(store, decision_id: str, updater) -> None:
+    with store.connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT payload_json FROM decisions WHERE id=?", (decision_id,)
+            ).fetchone()
+            if not row:
+                raise KeyError("decision not found")
+            payload = json.loads(row["payload_json"] or "{}")
+            updater(payload)
+            conn.execute(
+                "UPDATE decisions SET payload_json=? WHERE id=?",
+                (json.dumps(payload, ensure_ascii=False), decision_id),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def _refresh_rendered_expectations(store, task_id: str) -> None:
+    for decision in store.list_decisions(task_id=task_id, limit=500):
+        payload = decision.get("payload") if isinstance(decision.get("payload"), dict) else {}
+        template = payload.get("approved_expected_state")
+        if not isinstance(template, dict) or not template:
+            continue
+        try:
+            rendered = _render(store, task_id, template)
+        except ValueError:
+            continue
+        if rendered == payload.get("expected_state"):
+            continue
+        _update_payload(
+            store,
+            str(decision["id"]),
+            lambda current, value=rendered: current.__setitem__("expected_state", value),
+        )
+
+
 def install() -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -112,6 +152,9 @@ def install() -> None:
 
     def decision_plan(decision: dict[str, Any]) -> dict[str, Any]:
         payload = decision.get("payload") if isinstance(decision.get("payload"), dict) else {}
+        expected_template = payload.get("approved_expected_state")
+        if not isinstance(expected_template, dict):
+            expected_template = payload.get("expected_state") if isinstance(payload.get("expected_state"), dict) else {}
         return {
             "decision_id": str(decision.get("id") or ""),
             "plan_key": str(decision.get("plan_key") or ""),
@@ -123,7 +166,7 @@ def install() -> None:
             "tool_name": str(payload.get("tool_name") or ""),
             "arguments": payload.get("approved_args") if isinstance(payload.get("approved_args"), dict) else {},
             "arguments_hash": str(payload.get("approved_args_hash") or ""),
-            "expected_state": payload.get("expected_state") if isinstance(payload.get("expected_state"), dict) else {},
+            "expected_state": expected_template,
             "maximum_daily_budget": payload.get("maximum_daily_budget"),
             "depends_on": payload.get("depends_on") if isinstance(payload.get("depends_on"), list) else [],
         }
@@ -144,7 +187,7 @@ def install() -> None:
         for index, action in enumerate(actions):
             if not isinstance(action, dict):
                 continue
-            refs = _refs(action.get("arguments"))
+            refs = _refs(action.get("arguments")) | _refs(action.get("expected_state"))
             dependencies = {
                 str(item) for item in action.get("depends_on", [])
             } if isinstance(action.get("depends_on"), list) else set()
@@ -160,7 +203,26 @@ def install() -> None:
                     raise ValueError(
                         f"actions[{index}] dependency {reference} must precede the dependent action"
                     )
-        return original_create_plan(self, payload, actor)
+        result = original_create_plan(self, payload, actor)
+        task_id = str(result.get("task", {}).get("id") or "")
+        if task_id:
+            for decision in self.store.list_decisions(task_id=task_id, limit=500):
+                expected = decision.get("payload", {}).get("expected_state")
+                if isinstance(expected, dict):
+                    _update_payload(
+                        self.store,
+                        str(decision["id"]),
+                        lambda current, value=expected: current.setdefault(
+                            "approved_expected_state", value
+                        ),
+                    )
+            approval = result.get("approval") if isinstance(result.get("approval"), dict) else {}
+            current = self.store.get_approval(str(approval.get("id") or "")) if approval else None
+            if current:
+                result["approval"] = current
+            result["cycle"] = self.store.get_cycle(str(result.get("cycle", {}).get("id") or ""))
+            result["task"] = self.store.get_task(task_id)
+        return result
 
     def match(self, task_id: str, tool: dict[str, Any], args: dict[str, Any]):
         decision, reason = original_match(self, task_id, tool, args)
@@ -211,14 +273,12 @@ def install() -> None:
                     {"action_type": action_type},
                 )
                 return self.get_decision(decision_id) or result
-            with self.connection() as conn:
-                row = conn.execute("SELECT payload_json FROM decisions WHERE id=?", (decision_id,)).fetchone()
-                payload = json.loads(row["payload_json"] or "{}") if row else {}
-                payload["resolved_entity_id"] = resolved
-                conn.execute(
-                    "UPDATE decisions SET payload_json=? WHERE id=?",
-                    (json.dumps(payload, ensure_ascii=False), decision_id),
-                )
+            _update_payload(
+                self,
+                decision_id,
+                lambda payload, value=resolved: payload.__setitem__("resolved_entity_id", value),
+            )
+            _refresh_rendered_expectations(self, str(decision.get("task_id") or ""))
             self.event(
                 "info", "decision.entity_bound", "controller", decision.get("task_id"),
                 f"Bound created {action_type} to Amazon entity {resolved}",
