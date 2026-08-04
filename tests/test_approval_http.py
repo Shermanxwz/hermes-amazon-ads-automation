@@ -89,6 +89,7 @@ class ApprovalHttpTests(unittest.TestCase):
                 "title": "Create approved campaign",
                 "profile": {"profile_id": "p1", "marketplace": "US", "currency": "USD"},
                 "actions": [{
+                    "plan_key": "http-create-campaign",
                     "tool_name": CREATE_CAMPAIGN["registered_name"],
                     "action_type": "create_campaign",
                     "entity_type": "campaign",
