@@ -18,10 +18,10 @@ from .storage_alert_rollup import install as _install_storage_alert_rollup
 from .api_extension import install as _install_api_extension
 from .approval_gate import install as _install_approval_gate
 from .approval_hardening import install as _install_approval_hardening
+from .regional_mcp import install as _install_regional_mcp
 from .structural_execution import install as _install_structural_execution
 from .structural_hardening import install as _install_structural_hardening
 from .write_batch_hardening import install as _install_write_batch_hardening
-from .regional_mcp import install as _install_regional_mcp
 from .approval_contract_fixes import install as _install_approval_contract_fixes
 from .hermes_compat import install as _install_hermes_compat
 from .hermes_lifecycle import install as _install_hermes_lifecycle
@@ -34,10 +34,13 @@ _install_storage_alert_rollup()
 _install_api_extension()
 _install_approval_gate()
 _install_approval_hardening()
+# Region checks sit inside structural validators so malformed, forbidden, or
+# credential-bearing plans are rejected by their most specific invariant while
+# regional routing still completes before any plan is persisted.
+_install_regional_mcp()
 _install_structural_execution()
 _install_structural_hardening()
 _install_write_batch_hardening()
-_install_regional_mcp()
 _install_approval_contract_fixes()
 _install_hermes_compat()
 _install_hermes_lifecycle()
