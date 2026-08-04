@@ -161,7 +161,7 @@ class RegionalMCPTests(unittest.TestCase):
         self.assertFalse(action["allowed"])
         self.assertEqual(action["operation"], "job")
 
-    def test_regional_job_without_profile_is_blocked(self):
+    def test_regional_job_without_profile_is_blocked_by_live_schema_first(self):
         result = self.service.authorize_tool({
             "tool_name": "mcp_amazon_ads_fe_reporting_create_report",
             "args": {},
@@ -169,7 +169,7 @@ class RegionalMCPTests(unittest.TestCase):
             "tool_call_id": "report-no-profile",
         })
         self.assertFalse(result["allowed"])
-        self.assertIn("known Profile ID", result["reason"])
+        self.assertIn("$.profileId: required", result["reason"])
 
     def test_profile_discovery_is_allowed_before_profile_binding(self):
         result = self.service.authorize_tool({
