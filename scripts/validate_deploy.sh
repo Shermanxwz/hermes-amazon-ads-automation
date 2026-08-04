@@ -7,7 +7,13 @@ cp -a "$ROOT" "$TMP/package-src"
 rm -rf "$TMP/package-src/.venv" "$TMP/package-src/build" "$TMP/package-src/.coverage"
 find "$TMP/package-src" -type d \( -name __pycache__ -o -name '*.egg-info' \) -prune -exec rm -rf {} +
 cd "$TMP/package-src"
-python3 -m pip wheel . --no-deps --no-build-isolation -w "$TMP/dist" >/dev/null
+if python3 -c 'import setuptools.build_meta' >/dev/null 2>&1; then
+  python3 -m pip wheel . --no-deps --no-build-isolation -w "$TMP/dist" >/dev/null
+else
+  # Minimal hosted Python images may omit setuptools from the runner environment.
+  # Let PEP 517 create an isolated build environment from pyproject.toml instead.
+  python3 -m pip wheel . --no-deps -w "$TMP/dist" >/dev/null
+fi
 python3 -m venv "$TMP/installed"
 "$TMP/installed/bin/pip" install --no-deps "$TMP"/dist/*.whl >/dev/null
 "$TMP/installed/bin/amazon-ads-control" --help >/dev/null
