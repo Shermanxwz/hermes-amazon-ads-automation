@@ -9,21 +9,20 @@ from typing import Sequence
 
 from . import __version__
 from .api import build_server
+from .api_extension import install as install_api_extension
 from .config import Settings
 from .db import Store
+
+install_api_extension()
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="amazon-ads-control",
-        description="Hermes-native deterministic Amazon Ads control plane",
+        description="Hermes-native deterministic Amazon Ads closed-loop control plane",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="validate configuration and database integrity, then exit",
-    )
+    parser.add_argument("--check", action="store_true", help="validate configuration and database integrity, then exit")
     return parser
 
 
@@ -48,6 +47,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "version": __version__,
             "database": integrity,
             "expired_reservations_quarantined": len(expired),
+            "report_counts": store.dashboard().get("reports", {}).get("counts", {}),
             "host": settings.host,
             "port": settings.port,
         }, ensure_ascii=False))
@@ -56,7 +56,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     deleted = store.purge_old(settings.retention_days)
     store.event(
         "info", "controller.started", "controller", None,
-        "Amazon Ads control plane started",
+        "Amazon Ads closed-loop control plane started",
         {"retention_purge": deleted, "expired_reservations_quarantined": len(expired)},
     )
     server = build_server(settings, store)
