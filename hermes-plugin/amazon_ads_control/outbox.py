@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -21,6 +21,14 @@ _LOCK = threading.RLock()
 
 class OutboxCorruptError(RuntimeError):
     pass
+
+
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return min(maximum, max(minimum, value))
 
 
 def _default_path() -> Path:
@@ -127,6 +135,13 @@ def _write(path: Path, rows: list[dict[str, Any]]) -> None:
             pass
 
 
+def _limits() -> tuple[int, int]:
+    return (
+        _env_int("ADS_CONTROL_OUTBOX_MAX_EVENTS", 1000, 10, 100000),
+        _env_int("ADS_CONTROL_OUTBOX_MAX_BYTES", 8 * 1024 * 1024, 65536, 1024 * 1024 * 1024),
+    )
+
+
 def enqueue(payload: dict[str, Any]) -> dict[str, Any]:
     event = _event(payload)
     path = _path()
@@ -155,10 +170,48 @@ def status() -> dict[str, Any]:
     path = _path()
     with _file_lock(path):
         rows, quarantined = _load(path)
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            size = 0
     corrupt_files = sorted(str(item) for item in path.parent.glob(path.name + ".corrupt.*")) if path.parent.exists() else []
     if quarantined:
         corrupt_files.append(str(quarantined))
-    return {"path": str(path), "pending": len(rows), "corrupt_files": sorted(set(corrupt_files))}
+    max_events, max_bytes = _limits()
+    return {
+        "path": str(path),
+        "pending": len(rows),
+        "bytes": size,
+        "max_events": max_events,
+        "max_bytes": max_bytes,
+        "over_limit": len(rows) >= max_events or size >= max_bytes,
+        "corrupt_files": sorted(set(corrupt_files)),
+    }
+
+
+def maintenance() -> dict[str, Any]:
+    path = _path()
+    keep = _env_int("ADS_CONTROL_OUTBOX_CORRUPT_KEEP", 3, 1, 100)
+    retention_days = _env_int("ADS_CONTROL_OUTBOX_CORRUPT_RETENTION_DAYS", 30, 1, 3650)
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    removed: list[str] = []
+    with _file_lock(path):
+        _rows, quarantined = _load(path)
+        files = list(path.parent.glob(path.name + ".corrupt.*")) if path.parent.exists() else []
+        if quarantined and quarantined not in files:
+            files.append(quarantined)
+        files.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
+        for index, item in enumerate(files):
+            try:
+                modified = datetime.fromtimestamp(item.stat().st_mtime, UTC)
+            except FileNotFoundError:
+                continue
+            if index >= keep or modified < cutoff:
+                item.unlink(missing_ok=True)
+                removed.append(str(item))
+    result = status()
+    result["removed_corrupt_files"] = removed
+    return result
 
 
 def deliver(payload: dict[str, Any], sender: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
