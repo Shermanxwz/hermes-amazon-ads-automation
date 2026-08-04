@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "hermes-plugin" / "amazon_ads_control" / "outbox.py"
+UTC = timezone.utc
 
 
 def load():
@@ -84,6 +86,40 @@ class OutboxTests(unittest.TestCase):
                 self.assertEqual(module.pending_count(), 8)
                 rows = module._read(path)
                 self.assertEqual(len({row["event_id"] for row in rows}), 8)
+
+    def test_outbox_pressure_is_visible_before_more_amazon_operations(self):
+        module = load()
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "outbox.jsonl"
+            with patch.dict(os.environ, {
+                "ADS_CONTROL_OUTBOX_PATH": str(path),
+                "ADS_CONTROL_OUTBOX_MAX_BYTES": "65536",
+            }, clear=False):
+                module.enqueue({
+                    "tool_name": "mcp_amazon_ads_update_target", "tool_call_id": "large",
+                    "decision_id": "d", "reservation_token": "r", "result": {"payload": "x" * 70000},
+                })
+                state = module.status()
+                self.assertTrue(state["over_limit"])
+                self.assertGreater(state["bytes"], state["max_bytes"])
+
+    def test_corrupt_artifacts_are_bounded_and_old_files_are_removed(self):
+        module = load()
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "outbox.jsonl"
+            old_timestamp = (datetime.now(UTC) - timedelta(days=10)).timestamp()
+            for index in range(5):
+                artifact = Path(str(path) + f".corrupt.{index}")
+                artifact.write_text("broken", encoding="utf-8")
+                os.utime(artifact, (old_timestamp, old_timestamp))
+            with patch.dict(os.environ, {
+                "ADS_CONTROL_OUTBOX_PATH": str(path),
+                "ADS_CONTROL_OUTBOX_CORRUPT_KEEP": "2",
+                "ADS_CONTROL_OUTBOX_CORRUPT_RETENTION_DAYS": "1",
+            }, clear=False):
+                result = module.maintenance()
+                self.assertEqual(result["corrupt_files"], [])
+                self.assertEqual(len(result["removed_corrupt_files"]), 5)
 
 
 if __name__ == "__main__":
