@@ -85,6 +85,11 @@ class ApprovalHttpTests(unittest.TestCase):
             "/api/agent/catalog-sync", "POST", {"tools": [CREATE_CAMPAIGN]}, agent,
         )
         self.assertEqual(status, 200)
+        stored = self.server.RequestHandlerClass.app.store.get_tool(
+            CREATE_CAMPAIGN["registered_name"]
+        )
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored["source"], "hermes-registry:na", stored)
         status, result = self.request(
             "/api/agent/managed-plans", "POST", {
                 "title": "Create approved campaign",
