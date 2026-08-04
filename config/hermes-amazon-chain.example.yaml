@@ -44,14 +44,17 @@ mcp_servers:
     url: https://advertising-ai.amazon.com/mcp
     auth: oauth
     oauth:
-      client_id: ${AMAZON_ADS_CLIENT_ID}
-      scope: profile
-      redirect_port: 41515
-      redirect_uri: http://127.0.0.1:41515/callback/ciYSpNVlbv9P
-      client_secret: ${AMAZON_ADS_CLIENT_SECRET}
-      token_endpoint_auth_method: client_secret_basic
+      client_id: ${AMAZON_ADS_MCP_CLIENT_ID}
+      client_secret: ${AMAZON_ADS_MCP_CLIENT_SECRET}
+      scope: advertising::campaign_management
+      redirect_port: 0
+      client_name: Hermes Amazon Ads Autopilot
     connect_timeout: 60
     timeout: 180
+    supports_parallel_tool_calls: false
+    tools:
+      prompts: false
+      resources: false
     enabled: true
 
 fallback_providers:
@@ -65,8 +68,9 @@ compression:
   protect_last_n: 20
 
 # Hermes' native approval mode stays non-interactive for cron. Routine writes are
-# controlled by the plugin. High-risk structural plans require the separate
-# payload-bound /ads-approve command or the authenticated control Web.
+# controlled by the plugin. High-risk structural plans require the authenticated
+# control Web. Slash approval is disabled unless a separately isolated Gateway
+# explicitly opts in without terminal/file/environment-reading capabilities.
 approvals:
   cron_mode: allow
 
@@ -81,4 +85,6 @@ delegation:
   max_concurrent_children: 1
   max_spawn_depth: 1
   orchestrator_enabled: false
+  inherit_mcp_toolsets: true
+  subagent_auto_approve: false
   max_iterations: 35
