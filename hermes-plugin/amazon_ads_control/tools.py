@@ -49,6 +49,29 @@ def create_task(cycle_id, limit=25, **kwargs):
     }), ensure_ascii=False)
 
 
+def create_managed_plan(title, profile, actions, objective="", approval_summary="", approval_ttl_minutes=30, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/managed-plans", {
+        "title": title,
+        "profile": profile,
+        "actions": actions,
+        "objective": objective,
+        "approval_summary": approval_summary,
+        "approval_ttl_minutes": approval_ttl_minutes,
+        "parent_session_id": _session(kwargs),
+        "actor": "hermes-main",
+    }, timeout=30), ensure_ascii=False)
+
+
+def request_approval(task_id, summary="", ttl_minutes=30, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/approvals/request", {
+        "task_id": task_id,
+        "summary": summary,
+        "ttl_minutes": ttl_minutes,
+        "actor": "hermes-main",
+        "session_id": _session(kwargs),
+    }, timeout=15), ensure_ascii=False)
+
+
 def status(**kwargs):
     return json.dumps(client.context(_session(kwargs)), ensure_ascii=False)
 
