@@ -32,7 +32,7 @@ HERMES_HOME="$TMP/hermes" bash "$TMP/source/scripts/install.sh" >/dev/null
 [[ -L "$TMP/hermes/plugins/amazon-ads-control" ]]
 cd "$ROOT"
 if command -v nginx >/dev/null 2>&1; then
-  { echo "pid $TMP/nginx.pid;"; echo 'events {}'; echo 'http {'; echo 'server {'; echo 'listen 8080;'; cat deploy/nginx.conf; echo '}'; echo '}'; } > "$TMP/nginx.conf"
+  { echo "pid $TMP/nginx.pid;"; echo "error_log $TMP/error.log;"; echo 'events {}'; echo 'http {'; echo "access_log $TMP/access.log;"; echo 'server {'; echo 'listen 8080;'; cat deploy/nginx.conf; echo '}'; echo '}'; } > "$TMP/nginx.conf"
   nginx -t -c "$TMP/nginx.conf" -p "$TMP" >/dev/null
 fi
 if command -v systemd-analyze >/dev/null 2>&1; then
