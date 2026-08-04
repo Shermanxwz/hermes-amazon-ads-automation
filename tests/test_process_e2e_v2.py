@@ -1,5 +1,4 @@
 from pathlib import Path
-import hashlib
 import json
 import os
 import socket
@@ -14,7 +13,7 @@ from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor
 
 from amazon_ads_control.reporting import snapshot_hash
 from amazon_ads_control.security import hash_password
-from helpers import READ_CAMPAIGN, READ_TARGET, WRITE_TARGET, one_target_snapshot
+from helpers import READ_CAMPAIGN, READ_TARGET, REPORT_CREATE, WRITE_TARGET, one_target_snapshot
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -37,21 +36,32 @@ class ProcessE2EV2Tests(unittest.TestCase):
         }})
         self.assertEqual(status,201)
         report_id="report-"+job["id"]
-        content=hashlib.sha256(b"process-content").hexdigest()
-        schema=hashlib.sha256(b"process-schema").hexdigest()
+        status,allowed=self.request(base,"/api/agent/tool-check","POST",{
+            "tool_name":REPORT_CREATE["registered_name"],"args":{"reportTypeId":"process-e2e"},
+            "session_id":"main","tool_call_id":"report-action"
+        })
+        self.assertEqual(status,200); self.assertTrue(allowed["allowed"])
+        status,recorded=self.request(base,"/api/agent/tool-result","POST",{
+            "tool_name":REPORT_CREATE["registered_name"],"args":{"reportTypeId":"process-e2e"},
+            "result":{"reportId":report_id,"status":"SUCCESS","rows":[{"targetId":"t1","clicks":15}]},
+            "session_id":"main","tool_call_id":"report-action"
+        })
+        self.assertEqual(status,200)
+        evidence_id=recorded["action_id"]
         transitions=(
             ("SUBMITTED",{"report_id":report_id}),
-            ("SUCCEEDED",{"report_id":report_id}),
-            ("DOWNLOADED",{"content_hash":content}),
-            ("VALIDATED",{"schema_hash":schema}),
-            ("INGESTED",{"content_hash":content,"schema_hash":schema,"normalized_hash":snapshot_hash(snapshot),"row_count":1}),
+            ("SUCCEEDED",{}),
+            ("DOWNLOADED",{}),
+            ("VALIDATED",{"snapshot":snapshot}),
+            ("INGESTED",{}),
         )
         for state,data in transitions:
-            status,job=self.request(base,"/api/agent/reports/transition","POST",{
-                "report_job_id":job["id"],"status":state,"data":data
-            })
+            payload={"report_job_id":job["id"],"status":state,"data":data,"session_id":"main"}
+            if state in {"SUBMITTED","SUCCEEDED","DOWNLOADED"}:
+                payload["evidence_action_id"]=evidence_id
+            status,job=self.request(base,"/api/agent/reports/transition","POST",payload)
             self.assertEqual(status,200)
-        return {"report_job_ids":[job["id"]],"normalized_hash":snapshot_hash(snapshot),"action_ids":[]}
+        return {"report_job_ids":[job["id"]],"normalized_hash":snapshot_hash(snapshot),"action_ids":[evidence_id]}
 
     def test_full_main_executor_verifier_process_flow(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -72,7 +82,7 @@ class ProcessE2EV2Tests(unittest.TestCase):
                         time.sleep(.05)
                 else:
                     self.fail("server did not start")
-                self.assertEqual(self.request(base,"/api/agent/catalog-sync","POST",{"tools":[READ_CAMPAIGN,READ_TARGET,WRITE_TARGET]})[0],200)
+                self.assertEqual(self.request(base,"/api/agent/catalog-sync","POST",{"tools":[READ_CAMPAIGN,READ_TARGET,WRITE_TARGET,REPORT_CREATE]})[0],200)
                 jar=CookieJar(); browser=build_opener(HTTPCookieProcessor(jar))
                 login=Request(base+"/api/login",data=json.dumps({"password":"correct horse battery staple"}).encode(),method="POST",headers={"Content-Type":"application/json"})
                 with browser.open(login) as response:
@@ -83,6 +93,8 @@ class ProcessE2EV2Tests(unittest.TestCase):
 
                 snapshot=one_target_snapshot()
                 lineage=self.report_lineage(base,snapshot)
+                status,report_evidence=self.request(base,"/api/agent/report-evidence","POST",{"session_id":"main"})
+                self.assertEqual(status,200); self.assertEqual(report_evidence["evidence"][0]["id"],lineage["action_ids"][0])
                 status,cycle=self.request(base,"/api/agent/cycles/plan","POST",{"snapshot":snapshot,"lineage":lineage})
                 self.assertEqual(status,201)
                 status,task=self.request(base,"/api/agent/tasks","POST",{"cycle_id":cycle["id"]})
