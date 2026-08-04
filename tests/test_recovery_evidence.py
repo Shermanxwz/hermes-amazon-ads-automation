@@ -88,7 +88,6 @@ class RecoveryEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "predates the write"):
             self.service.verify_decision({"decision_id": decision["id"], "session_id": "verify", "evidence_action_id": evidence})
 
-        # A separate fresh read can still be rejected when it has aged past the evidence TTL.
         evidence = self._read_action(task)
         with self.store.connection() as conn:
             conn.execute("UPDATE decisions SET executed_at=? WHERE id=?", ((datetime.now(UTC)-timedelta(hours=2)).isoformat(), decision["id"]))
@@ -137,7 +136,7 @@ class RecoveryEvidenceTests(unittest.TestCase):
             "schema":{"description":"Query campaign","parameters":{"type":"object"}},
         }
         self.store.sync_catalog([descriptor_from_payload(READ_TARGET), descriptor_from_payload(WRITE_TARGET), descriptor_from_payload(campaign_read)])
-        auth=self.service.authorize_tool({"tool_name":campaign_read["registered_name"],"args":{"campaignId":"c1"},"session_id":"verify"})
+        self.service.authorize_tool({"tool_name":campaign_read["registered_name"],"args":{"campaignId":"c1"},"session_id":"verify"})
         wrong=self.service.finish_tool({"tool_name":campaign_read["registered_name"],"args":{"campaignId":"c1"},"result":{"campaignId":"c1"},"session_id":"verify","task_id":task["id"]})["action_id"]
         with self.assertRaisesRegex(ValueError,"family"):
             self.service.verify_decision({"decision_id":decision["id"],"session_id":"verify","evidence_action_id":wrong})
@@ -174,7 +173,7 @@ class RecoveryEvidenceTests(unittest.TestCase):
         }
         self.store.sync_catalog([descriptor_from_payload(placement_tool)])
         self.store.update_settings({"mode":"autopilot","execution_enabled":True})
-        snapshot=one_target_snapshot(); snapshot["targets"]=[]; snapshot["placements"]=[{"campaign_id":"c","placement":"TOP_OF_SEARCH","adjustment_percent":0,"clicks":20,"spend":10,"sales":100,"orders":3}]
+        snapshot=one_target_snapshot(); snapshot["targets"]=[]; snapshot["placements"]=[{"campaign_id":"c","ad_product":"SPONSORED_PRODUCTS","placement":"TOP_OF_SEARCH","adjustment_percent":0,"clicks":20,"spend":10,"sales":100,"orders":3}]
         cycle=self.service.plan_cycle({"snapshot":snapshot},"main"); task=self.service.create_task({"cycle_id":cycle["id"]},"main")
         self.service.bind_worker({"task_id":task["id"],"worker_session_id":"exec-placement","role":"executor","goal":marker(task["id"],"executor")})
         auth=self.service.authorize_tool({"tool_name":placement_tool["registered_name"],"args":{"campaignId":"c","placement":"PLACEMENT_TOP","percentage":10},"session_id":"exec-placement"})
