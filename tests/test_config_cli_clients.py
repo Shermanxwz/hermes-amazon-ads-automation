@@ -48,22 +48,33 @@ class ConfigTests(unittest.TestCase):
         base = {"ADS_CONTROL_HOST": "127.0.0.1", "ADS_CONTROL_PORT": "8790", "ADS_CONTROL_PUBLIC_ORIGIN": "https://ads.example.com", "ADS_CONTROL_AGENT_TOKEN": "x" * 48, "ADS_CONTROL_PASSWORD_HASH": hash_password("correct horse battery staple")}
         with patch.dict(os.environ, base, clear=True):
             settings = Settings.from_env(); settings.validate_runtime(); self.assertEqual(settings.public_origin, "https://ads.example.com")
+            self.assertEqual(settings.maintenance_interval_seconds, 21600)
+            self.assertEqual(settings.storage_hard_limit_mb, 1024)
         with patch.dict(os.environ, {**base, "ADS_CONTROL_HOST": "0.0.0.0"}, clear=True):
             with self.assertRaisesRegex(ValueError, "non-loopback"): Settings.from_env()
         with patch.dict(os.environ, {**base, "ADS_CONTROL_PUBLIC_ORIGIN": "https://ads.example.com/path"}, clear=True):
             with self.assertRaisesRegex(ValueError, "origin"): Settings.from_env()
         with patch.dict(os.environ, {**base, "ADS_CONTROL_AGENT_TOKEN": " short "}, clear=True):
             with self.assertRaisesRegex(ValueError, "AGENT_TOKEN"): Settings.from_env().validate_runtime()
+        with patch.dict(os.environ, {
+            **base,
+            "ADS_CONTROL_STORAGE_SOFT_LIMIT_MB": "512",
+            "ADS_CONTROL_STORAGE_HARD_LIMIT_MB": "256",
+        }, clear=True):
+            with self.assertRaisesRegex(ValueError, "greater than the soft limit"):
+                Settings.from_env().validate_runtime()
 
     def test_server_help_version_and_check(self):
-        self.assertEqual(__version__, "3.0.0")
+        self.assertEqual(__version__, "3.1.0")
         with self.assertRaises(SystemExit) as ctx, redirect_stdout(io.StringIO()): server_module.main(["--help"])
         self.assertEqual(ctx.exception.code, 0)
         with tempfile.TemporaryDirectory() as td:
             env = {"ADS_CONTROL_HOST": "127.0.0.1", "ADS_CONTROL_PORT": "8790", "ADS_CONTROL_DB": str(Path(td) / "state.db"), "ADS_CONTROL_AGENT_TOKEN": "x" * 48, "ADS_CONTROL_PASSWORD_HASH": hash_password("correct horse battery staple")}
             output = io.StringIO()
             with patch.dict(os.environ, env, clear=True), redirect_stdout(output): self.assertEqual(server_module.main(["--check"]), 0)
-            self.assertTrue(json.loads(output.getvalue())["ok"])
+            result = json.loads(output.getvalue())
+            self.assertTrue(result["ok"])
+            self.assertIn("storage", result)
 
 
 class ControlCliTests(unittest.TestCase):
@@ -74,7 +85,7 @@ class ControlCliTests(unittest.TestCase):
         with patch("getpass.getpass", side_effect=["a" * 14, "b" * 14]), redirect_stderr(io.StringIO()): self.assertEqual(control_cli.main(["hash-password"]), 2)
         with patch("getpass.getpass", side_effect=["short", "short"]), redirect_stderr(io.StringIO()): self.assertEqual(control_cli.main(["hash-password"]), 2)
 
-    def test_verify_and_backup_database(self):
+    def test_verify_backup_and_storage_database(self):
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "state.db"; backup = Path(td) / "backup.db"; Store(db).event("info", "test", "test", None, "hello", {})
             out = io.StringIO()
@@ -83,6 +94,9 @@ class ControlCliTests(unittest.TestCase):
             out = io.StringIO()
             with redirect_stdout(out): self.assertEqual(control_cli.main(["backup", "--database", str(db), "--output", str(backup)]), 0)
             result = json.loads(out.getvalue()); self.assertEqual(Path(result["path"]), backup); self.assertEqual(backup.stat().st_mode & 0o777, 0o600); self.assertEqual(len(Store(backup).list_events()), 1)
+            out = io.StringIO()
+            with redirect_stdout(out): self.assertEqual(control_cli.main(["storage-status", "--database", str(db)]), 0)
+            self.assertIn("sqlite", json.loads(out.getvalue()))
 
 
 class _FixtureHandler(BaseHTTPRequestHandler):
