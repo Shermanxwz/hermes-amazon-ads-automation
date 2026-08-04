@@ -41,8 +41,13 @@ class StrategyTests(unittest.TestCase):
             {"search_term":"bad","campaign_id":"c","ad_group_id":"g","ad_product":PRODUCT,"clicks":15,"spend":25,"sales":0,"orders":0},
             {"search_term":"good","campaign_id":"c","ad_group_id":"g","ad_product":PRODUCT,"clicks":20,"spend":10,"sales":100,"orders":3,"already_exact":False},
         ]
-        rules={d.rule_id for d in self.engine.plan(s,self.policy).decisions}
+        decisions=self.engine.plan(s,self.policy).decisions
+        rules={d.rule_id for d in decisions}
         self.assertEqual(rules,{"ADS-SEARCH-NEGATIVE","ADS-SEARCH-HARVEST"})
+        harvest=next(d for d in decisions if d.rule_id=="ADS-SEARCH-HARVEST")
+        self.assertFalse(harvest.payload["migration"]["source_negative_automatic"])
+        self.assertTrue(harvest.payload["migration"]["source_traffic_preserved"])
+        self.assertIn("不会",harvest.reason)
 
     def test_budget_placement_and_recommendation(self):
         s=one_target_snapshot(); s["targets"]=[]
