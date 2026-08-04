@@ -372,19 +372,17 @@ def register(ctx):
     if hasattr(ctx, "register_command"):
         ctx.register_command(
             "ads-approvals",
-            _approvals_command,
+            handler=_approvals_command,
             description="列出等待用户批准的 Amazon Ads 高风险计划",
         )
         ctx.register_command(
             "ads-approve",
-            _approve_command,
+            handler=_approve_command,
             description="批准一个精确 Payload Hash 绑定的 Amazon Ads 计划",
-            args_hint="<approval_id> <hash前12位>",
         )
         ctx.register_command(
             "ads-reject",
-            _reject_command,
+            handler=_reject_command,
             description="拒绝一个 Amazon Ads 高风险计划",
-            args_hint="<approval_id> <原因>",
         )
     ctx.register_skill(name="amazon-ads-autopilot", path=Path(__file__).parent / "skill" / "SKILL.md")
