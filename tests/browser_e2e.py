@@ -106,10 +106,16 @@ def main() -> int:
                 page.get_by_role("button", name="审批", exact=True).click()
                 page.locator("#approvals.tab.active").wait_for()
                 assert page.get_by_text("Browser exact Campaign approval", exact=True).is_visible()
-                page.get_by_text("1. create_campaign", exact=False).click()
-                assert page.get_by_text("browser-campaign", exact=True).is_visible()
-                assert page.get_by_text("Browser Approved Campaign", exact=False).first.is_visible()
-                assert page.get_by_text('"budget": 19', exact=False).first.is_visible()
+                action = page.locator("#approval-list details.approval-action").first
+                action.locator("summary").click()
+                assert action.get_attribute("open") is not None
+                assert "browser-campaign" in action.inner_text()
+                argument_json = action.locator("pre").nth(0).inner_text()
+                expected_json = action.locator("pre").nth(1).inner_text()
+                assert "Browser Approved Campaign" in argument_json
+                assert '"budget": 19' in argument_json
+                assert '"state": "PAUSED"' in argument_json
+                assert "Browser Approved Campaign" in expected_json
                 assert page.get_by_text(approval_hash, exact=True).is_visible()
                 assert page.get_by_role("button", name="批准", exact=True).is_visible()
 
