@@ -41,16 +41,55 @@ def campaign_tool(region: str) -> dict:
     }
 
 
+def report_tool(region: str) -> dict:
+    return {
+        "registered_name": f"mcp_amazon_ads_{region}_reporting_create_report",
+        "native_name": "reporting-create_report",
+        "server_name": "amazon-ads",
+        "source": f"hermes-registry:{region}",
+        "schema": {
+            "description": "Create a report job for one Profile",
+            "parameters": {
+                "type": "object",
+                "required": ["profileId"],
+                "properties": {"profileId": {"type": "string"}},
+            },
+        },
+    }
+
+
+def profile_tool(region: str) -> dict:
+    return {
+        "registered_name": f"mcp_amazon_ads_{region}_account_management_query_advertiser_accounts",
+        "native_name": "account_management-query_advertiser_accounts",
+        "server_name": "amazon-ads",
+        "source": f"hermes-registry:{region}",
+        "schema": {
+            "description": "Query advertiser accounts and Profiles",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
 class RegionalMCPTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = Store(Path(self.temp.name) / "state.db")
         self.service = ControlService(self.store)
-        self.store.sync_catalog([
-            descriptor_from_payload(campaign_tool("na")),
-            descriptor_from_payload(campaign_tool("eu")),
-            descriptor_from_payload(campaign_tool("fe")),
-        ])
+        descriptors = []
+        for region in ("na", "eu", "fe"):
+            descriptors.extend([
+                descriptor_from_payload(campaign_tool(region)),
+                descriptor_from_payload(report_tool(region)),
+                descriptor_from_payload(profile_tool(region)),
+            ])
+        self.store.sync_catalog(descriptors)
+        self.store.upsert_profile({
+            "profile_id": "profile-sg",
+            "marketplace": "SG",
+            "country_code": "SG",
+            "currency": "SGD",
+        })
 
     def tearDown(self):
         self.temp.cleanup()
@@ -98,6 +137,49 @@ class RegionalMCPTests(unittest.TestCase):
     def test_unknown_marketplace_is_rejected_for_tagged_tool(self):
         with self.assertRaisesRegex(ValueError, "recognized country_code/marketplace"):
             self.service.create_managed_plan(self.payload("fe", "XX"), "main")
+
+    def test_matching_regional_report_job_is_allowed(self):
+        result = self.service.authorize_tool({
+            "tool_name": "mcp_amazon_ads_fe_reporting_create_report",
+            "args": {"profileId": "profile-sg"},
+            "session_id": "main-session",
+            "tool_call_id": "report-fe",
+        })
+        self.assertTrue(result["allowed"], result)
+        self.assertEqual(result["operation"], "job")
+
+    def test_cross_region_report_job_is_blocked_and_audited(self):
+        result = self.service.authorize_tool({
+            "tool_name": "mcp_amazon_ads_na_reporting_create_report",
+            "args": {"profileId": "profile-sg"},
+            "session_id": "main-session",
+            "tool_call_id": "report-na",
+        })
+        self.assertFalse(result["allowed"])
+        self.assertIn("requires Amazon Ads MCP region fe", result["reason"])
+        action = self.store.get_action(result["action_id"])
+        self.assertFalse(action["allowed"])
+        self.assertEqual(action["operation"], "job")
+
+    def test_regional_job_without_profile_is_blocked(self):
+        result = self.service.authorize_tool({
+            "tool_name": "mcp_amazon_ads_fe_reporting_create_report",
+            "args": {},
+            "session_id": "main-session",
+            "tool_call_id": "report-no-profile",
+        })
+        self.assertFalse(result["allowed"])
+        self.assertIn("known Profile ID", result["reason"])
+
+    def test_profile_discovery_is_allowed_before_profile_binding(self):
+        result = self.service.authorize_tool({
+            "tool_name": "mcp_amazon_ads_fe_account_management_query_advertiser_accounts",
+            "args": {},
+            "session_id": "main-session",
+            "tool_call_id": "profiles-fe",
+        })
+        self.assertTrue(result["allowed"], result)
+        self.assertEqual(result["operation"], "read")
 
 
 if __name__ == "__main__":
