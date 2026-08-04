@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any
 
-from . import client, outbox, schemas, tools
+from . import client, outbox, resources, schemas, tools
 
 PREFIX = "mcp_amazon_ads_"
 TOOLSET = "mcp-amazon-ads"
@@ -94,6 +94,7 @@ def pre_llm_call(session_id=None, **kwargs):
         "execution_enabled": state.get("execution_enabled"),
         "catalog": state.get("catalog"),
         "catalog_sync": catalog,
+        "runtime_resources": resources.snapshot(),
         "result_outbox_pending": outbox.pending_count(),
         "task_id": task.get("id") if task else None,
         "task_status": task.get("status") if task else None,
@@ -203,9 +204,6 @@ def post_tool_call(
         "plan_key": authorization.get("plan_key"),
         "reservation_token": authorization.get("reservation_token"),
     }
-    # This callback is not an Amazon write. Retrying it is safe and necessary:
-    # the durable event ID lets the control plane deduplicate while preserving
-    # the original Amazon result after process/network failure.
     return outbox.deliver(payload, _result_sender)
 
 
