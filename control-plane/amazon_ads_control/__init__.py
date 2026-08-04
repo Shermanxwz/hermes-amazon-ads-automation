@@ -22,6 +22,7 @@ from .structural_execution import install as _install_structural_execution
 from .structural_hardening import install as _install_structural_hardening
 from .write_batch_hardening import install as _install_write_batch_hardening
 from .regional_mcp import install as _install_regional_mcp
+from .approval_contract_fixes import install as _install_approval_contract_fixes
 from .hermes_compat import install as _install_hermes_compat
 from .hermes_lifecycle import install as _install_hermes_lifecycle
 _install_report_evidence_hardening()
@@ -36,6 +37,7 @@ _install_structural_execution()
 _install_structural_hardening()
 _install_write_batch_hardening()
 _install_regional_mcp()
+_install_approval_contract_fixes()
 _install_hermes_compat()
 _install_hermes_lifecycle()
 
@@ -45,4 +47,5 @@ del _install_task_hardening, _install_storage_maintenance, _install_storage_aler
 del _install_api_extension, _install_approval_gate, _install_approval_hardening
 del _install_structural_execution, _install_structural_hardening
 del _install_write_batch_hardening, _install_regional_mcp
+del _install_approval_contract_fixes
 del _install_hermes_compat, _install_hermes_lifecycle
