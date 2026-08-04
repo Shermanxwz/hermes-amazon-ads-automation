@@ -4,6 +4,7 @@ from amazon_ads_control.strategy import OptimizationEngine, StrategyPolicy
 from helpers import dates, one_target_snapshot
 
 UTC=timezone.utc
+PRODUCT="SPONSORED_PRODUCTS"
 
 
 class StrategyTests(unittest.TestCase):
@@ -37,17 +38,17 @@ class StrategyTests(unittest.TestCase):
 
     def test_search_negative_and_harvest(self):
         s=one_target_snapshot(); s["targets"]=[]; s["search_terms"]=[
-            {"search_term":"bad","campaign_id":"c","ad_group_id":"g","clicks":15,"spend":25,"sales":0,"orders":0},
-            {"search_term":"good","campaign_id":"c","ad_group_id":"g","clicks":20,"spend":10,"sales":100,"orders":3,"already_exact":False},
+            {"search_term":"bad","campaign_id":"c","ad_group_id":"g","ad_product":PRODUCT,"clicks":15,"spend":25,"sales":0,"orders":0},
+            {"search_term":"good","campaign_id":"c","ad_group_id":"g","ad_product":PRODUCT,"clicks":20,"spend":10,"sales":100,"orders":3,"already_exact":False},
         ]
         rules={d.rule_id for d in self.engine.plan(s,self.policy).decisions}
         self.assertEqual(rules,{"ADS-SEARCH-NEGATIVE","ADS-SEARCH-HARVEST"})
 
     def test_budget_placement_and_recommendation(self):
         s=one_target_snapshot(); s["targets"]=[]
-        s["campaigns"]=[{"campaign_id":"c","state":"ENABLED","budget":100,"spend":20,"sales":100,"orders":3}]
+        s["campaigns"]=[{"campaign_id":"c","ad_product":PRODUCT,"state":"ENABLED","budget":100,"clicks":20,"spend":20,"sales":100,"orders":3}]
         s["budget_usage"]=[{"campaign_id":"c","budget_usage_percent":95}]
-        s["placements"]=[{"campaign_id":"c","placement":"TOP_OF_SEARCH","adjustment_percent":10,"clicks":20,"spend":10,"sales":100,"orders":3}]
+        s["placements"]=[{"campaign_id":"c","ad_product":PRODUCT,"placement":"TOP_OF_SEARCH","adjustment_percent":10,"clicks":20,"spend":10,"sales":100,"orders":3}]
         s["recommendations"]=[{"recommendation_id":"r","type":"BID","entity_id":"t","payload":{},"expected_state":{"bid":1}}]
         default_rules={d.rule_id for d in self.engine.plan(s,self.policy).decisions}
         self.assertEqual(default_rules,{"ADS-BUDGET-PACING-WINNER","ADS-PLACEMENT-TOS-SCALE"})
