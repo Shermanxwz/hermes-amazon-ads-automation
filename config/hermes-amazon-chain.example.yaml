@@ -1,4 +1,4 @@
-# Complete sanitized Hermes example. Keep real values in $HERMES_HOME/.env or a secret manager.
+# Complete sanitized Hermes 0.18.2+ example. Keep real values in $HERMES_HOME/.env or a secret manager.
 plugins:
   enabled:
     - amazon-ads-control
@@ -64,16 +64,21 @@ compression:
   target_ratio: 0.2
   protect_last_n: 20
 
-# The plugin/control plane is the authorization boundary for Ads writes.
-# Cron must not wait for an interactive approval prompt.
+# Hermes' native approval mode stays non-interactive for cron. Routine writes are
+# controlled by the plugin. High-risk structural plans require the separate
+# payload-bound /ads-approve command or the authenticated control Web.
 approvals:
   cron_mode: allow
 
 delegation:
+  # Hermes 0.18.2 has one dependable global delegation model. The controller
+  # machine-enforces different Executor/Verifier sessions; different models are
+  # an optional deployment hardening only after the installed Hermes build is verified.
   model: MiniMax-M3
   provider: custom:new-api-230385
   reasoning_effort: max
-  max_concurrent_children: 2
+  # Safe default for the target 2C2G VPS: Executor and Verifier run sequentially.
+  max_concurrent_children: 1
   max_spawn_depth: 1
   orchestrator_enabled: false
   max_iterations: 35
