@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import resources
 from urllib.parse import parse_qs, urlparse
 
 _INSTALLED = False
@@ -13,6 +14,23 @@ def install() -> None:
 
     original_get = Handler.do_GET
     original_post = Handler.do_POST
+    original_static = Handler._static
+
+    def static(self, filename: str) -> None:
+        safe = filename.strip("/") or "index.html"
+        if safe != "app_v3.js":
+            return original_static(self, filename)
+        try:
+            body = resources.files("amazon_ads_control.static").joinpath(safe).read_bytes()
+        except FileNotFoundError:
+            self._respond(404, {"error": "not_found"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/javascript; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self._security_headers()
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -56,6 +74,7 @@ def install() -> None:
             self.app.store.event("error", "api.closed_loop_error", "controller", None, str(exc), {"path": path})
             self._respond(500, {"error": "internal_error"})
 
+    Handler._static = static
     Handler.do_GET = do_GET
     Handler.do_POST = do_POST
     _INSTALLED = True
