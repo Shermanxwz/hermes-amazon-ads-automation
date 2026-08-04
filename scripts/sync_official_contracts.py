@@ -55,7 +55,7 @@ EXTENDED_CAPABILITIES = {
     "partner_opportunities": ("partner opportunity", "partner opportunities"),
 }
 
-REQUIRED_CAPABILITIES = CORE_REQUIRED_CAPABILITIES  # Backward-compatible import.
+REQUIRED_CAPABILITIES = CORE_REQUIRED_CAPABILITIES
 VARIABLE_RE = re.compile(r"\{\{[^{}]+\}\}")
 VERSION_RE = re.compile(r"/(v\d+)(?:/|$)", re.I)
 SECRET_HEADER_NAMES = {"authorization", "proxy-authorization"}
@@ -182,25 +182,27 @@ def walk_items(items: Any, parents: tuple[str, ...] = ()):
         if not isinstance(request, dict):
             continue
         raw_url = request_url(request)
-        path = _sanitize_url(raw_url)
+        endpoint_path = _sanitize_url(raw_url)
         method = str(request.get("method") or "UNKNOWN").upper()
         description = request.get("description")
         description_text = description if isinstance(description, str) else ""
         body = _body_contract(request)
         version = None
-        match = VERSION_RE.search(path)
+        match = VERSION_RE.search(endpoint_path)
         if match:
             version = match.group(1).lower()
         async_hints = sorted({
             hint for hint in ("report", "status", "download", "poll", "snapshot", "export")
-            if hint in f"{name} {path} {description_text}".lower()
+            if hint in f"{name} {endpoint_path} {description_text}".lower()
         })
+        display_path = " / ".join((*parents, name))
         contract = {
             "name": name,
             "folder_path": " / ".join(parents),
-            "display_path": " / ".join((*parents, name)),
+            "display_path": display_path,
+            "path": display_path,
             "method": method,
-            "path": path,
+            "endpoint_path": endpoint_path,
             "version": version,
             "headers": _header_contract(request),
             "body": body,
@@ -212,7 +214,7 @@ def walk_items(items: Any, parents: tuple[str, ...] = ()):
         canonical = json.dumps(
             {
                 "method": contract["method"],
-                "path": contract["path"],
+                "path": contract["endpoint_path"],
                 "headers": contract["headers"],
                 "body": contract["body"],
             },
@@ -233,7 +235,7 @@ def _capabilities(searchable: str, definitions: dict[str, tuple[str, ...]]) -> d
 
 def _semantic_index(endpoints: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {
-        f"{row['method']} {row['path']}": {
+        f"{row['method']} {row.get('endpoint_path') or row['path']}": {
             "contract_id": row["contract_id"],
             "display_path": row["display_path"],
             "body": row["body"],
@@ -261,7 +263,7 @@ def summarize(raw: bytes, source: str) -> dict[str, Any]:
     searchable = "\n".join(
         [collection_contract.lower()]
         + [
-            f"{row['display_path']} {row['method']} {row['path']} {row.pop('search_text', '')}".lower()
+            f"{row['display_path']} {row['method']} {row['endpoint_path']} {row.pop('search_text', '')}".lower()
             for row in endpoints
         ]
     )
@@ -298,6 +300,7 @@ def summarize(raw: bytes, source: str) -> dict[str, Any]:
                 "display_path": row["display_path"],
                 "method": row["method"],
                 "path": row["path"],
+                "endpoint_path": row["endpoint_path"],
                 "contract_id": row["contract_id"],
             }
             for row in endpoints[:20]
