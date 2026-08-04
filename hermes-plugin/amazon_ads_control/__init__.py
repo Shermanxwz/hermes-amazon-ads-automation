@@ -74,6 +74,26 @@ def sync_live_catalog(force: bool = False) -> dict[str, Any]:
         return response
 
 
+def _approval_view(item: dict[str, Any]) -> dict[str, Any]:
+    digest = str(item.get("payload_hash") or "")
+    row = {
+        "id": item.get("id"),
+        "summary": item.get("summary"),
+        "risk": item.get("risk"),
+        "actions": len(item.get("decision_ids") or []),
+        "payload_hash": digest,
+        "expires_at": item.get("expires_at"),
+        "approval_surface": (
+            "restricted-hermes-command-or-authenticated-web"
+            if client.COMMAND_APPROVAL_ENABLED
+            else "authenticated-control-web-only"
+        ),
+    }
+    if client.COMMAND_APPROVAL_ENABLED:
+        row["approve_command"] = f"/ads-approve {item.get('id')} {digest[:12]}"
+    return row
+
+
 def pre_llm_call(session_id=None, **kwargs):
     catalog = sync_live_catalog()
     runtime = resources.snapshot()
@@ -88,18 +108,7 @@ def pre_llm_call(session_id=None, **kwargs):
     task = state.get("task")
     approvals = state.get("approvals") if isinstance(state.get("approvals"), dict) else {}
     pending = approvals.get("pending") if isinstance(approvals.get("pending"), list) else []
-    compact_pending = [
-        {
-            "id": item.get("id"),
-            "summary": item.get("summary"),
-            "risk": item.get("risk"),
-            "actions": len(item.get("decision_ids") or []),
-            "payload_hash": item.get("payload_hash"),
-            "expires_at": item.get("expires_at"),
-            "approve_command": f"/ads-approve {item.get('id')} {str(item.get('payload_hash') or '')[:12]}",
-        }
-        for item in pending[:10]
-    ]
+    compact_pending = [_approval_view(item) for item in pending[:10]]
     compact = {
         "role": state.get("role"),
         "mode": state.get("mode"),
@@ -113,17 +122,28 @@ def pre_llm_call(session_id=None, **kwargs):
         "task_id": task.get("id") if task else None,
         "task_status": task.get("status") if task else None,
         "decisions": [
-            {"id": item.get("id"), "action": item.get("action_type"), "entity": item.get("entity_id"),
-             "status": item.get("status"), "payload": item.get("payload")}
+            {
+                "id": item.get("id"),
+                "action": item.get("action_type"),
+                "entity": item.get("entity_id"),
+                "status": item.get("status"),
+                "payload": item.get("payload"),
+            }
             for item in state.get("decisions", [])
         ],
     }
     approval_instruction = ""
     if compact_pending:
+        surface = (
+            "展示精确 /ads-approve 命令或登录后的控制 Web"
+            if client.COMMAND_APPROVAL_ENABLED
+            else "仅引导用户进入登录后的控制 Web 审批；当前 Hermes 命令审批未启用"
+        )
         approval_instruction = (
-            "\n存在待人工批准的高风险计划。Main 必须向用户展示 Profile、动作、预算上限、"
-            "Payload Hash、过期时间和精确 /ads-approve 命令。AI 不得代替用户批准，"
-            "不得把普通自然语言回答当成授权。"
+            "\n存在待人工批准的高风险计划。Main 必须向用户展示 Profile、每个动作、"
+            "完整参数、预期状态、预算上限、Payload Hash 和过期时间，并"
+            + surface
+            + "。AI 不得代替用户批准，不得把普通自然语言回答当成授权。"
         )
     return {
         "context": "[Amazon Ads Control v3.2]\n"
@@ -134,7 +154,12 @@ def pre_llm_call(session_id=None, **kwargs):
     }
 
 
-def _remember_authorization(tool_call_id: str | None, session_id: str, tool_name: str, result: dict[str, Any]) -> None:
+def _remember_authorization(
+    tool_call_id: str | None,
+    session_id: str,
+    tool_name: str,
+    result: dict[str, Any],
+) -> None:
     with _PENDING_LOCK:
         if tool_call_id:
             _PENDING_BY_CALL[tool_call_id] = result
@@ -142,7 +167,11 @@ def _remember_authorization(tool_call_id: str | None, session_id: str, tool_name
             _PENDING_FALLBACK[(session_id, tool_name)].append(result)
 
 
-def _take_authorization(tool_call_id: str | None, session_id: str, tool_name: str) -> dict[str, Any]:
+def _take_authorization(
+    tool_call_id: str | None,
+    session_id: str,
+    tool_name: str,
+) -> dict[str, Any]:
     with _PENDING_LOCK:
         if tool_call_id:
             return _PENDING_BY_CALL.pop(tool_call_id, {})
@@ -159,7 +188,10 @@ def pre_tool_call(tool_name, args, task_id="", tool_call_id=None, **kwargs):
     session_id = _session(task_id=task_id, **kwargs)
     sync = sync_live_catalog()
     if sync.get("error"):
-        return {"action": "block", "message": "Amazon Ads MCP catalog refresh is unavailable; operation failed closed"}
+        return {
+            "action": "block",
+            "message": "Amazon Ads MCP catalog refresh is unavailable; operation failed closed",
+        }
     outbox_state = outbox.maintenance()
     if outbox_state.get("over_limit"):
         return {
@@ -167,17 +199,34 @@ def pre_tool_call(tool_name, args, task_id="", tool_call_id=None, **kwargs):
             "message": "Amazon Ads durable result outbox reached its bounded safety limit; flush or repair it before new MCP operations",
         }
     result = client.request("POST", "/api/agent/tool-check", {
-        "tool_name": tool_name, "args": args or {}, "session_id": session_id, "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "args": args or {},
+        "session_id": session_id,
+        "tool_call_id": tool_call_id,
     })
     if result.get("error"):
-        return {"action": "block", "message": "Amazon Ads control plane unavailable; operation failed closed"}
+        return {
+            "action": "block",
+            "message": "Amazon Ads control plane unavailable; operation failed closed",
+        }
     if result.get("allowed") is False:
-        return {"action": "block", "message": result.get("reason") or "Amazon Ads policy denied the tool"}
+        return {
+            "action": "block",
+            "message": result.get("reason") or "Amazon Ads policy denied the tool",
+        }
     _remember_authorization(tool_call_id, session_id, tool_name, result)
     return None
 
 
-def post_tool_call(tool_name, args, result, task_id="", duration_ms=0, tool_call_id=None, **kwargs):
+def post_tool_call(
+    tool_name,
+    args,
+    result,
+    task_id="",
+    duration_ms=0,
+    tool_call_id=None,
+    **kwargs,
+):
     if tool_name.startswith("ads_control_") or not tool_name.startswith(PREFIX):
         return
     session_id = _session(task_id=task_id, **kwargs)
@@ -196,20 +245,37 @@ def post_tool_call(tool_name, args, result, task_id="", duration_ms=0, tool_call
     }, _result_sender)
 
 
-def subagent_start(parent_session_id, child_session_id, child_subagent_id, child_role, child_goal, **kwargs):
+def subagent_start(
+    parent_session_id,
+    child_session_id,
+    child_subagent_id,
+    child_role,
+    child_goal,
+    **kwargs,
+):
     match = TASK_MARKER.search(child_goal or "")
     role_match = ROLE_MARKER.search(child_goal or "")
     if not match or not role_match or not child_session_id:
         client.request("POST", "/api/agent/events", {
-            "level": "warning", "type": "worker.unbound", "actor": "hermes-main",
+            "level": "warning",
+            "type": "worker.unbound",
+            "actor": "hermes-main",
             "message": "Delegated Amazon Ads child requires both task and role markers",
-            "data": {"child_subagent_id": child_subagent_id, "goal": (child_goal or "")[:500]},
+            "data": {
+                "child_subagent_id": child_subagent_id,
+                "child_role": child_role,
+                "goal": (child_goal or "")[:500],
+            },
         })
         return
     client.request("POST", "/api/agent/worker-bind", {
-        "task_id": match.group(1), "parent_session_id": parent_session_id,
-        "worker_session_id": child_session_id, "worker_subagent_id": child_subagent_id,
-        "role": role_match.group(1).lower(), "goal": child_goal, "model": kwargs.get("child_model"),
+        "task_id": match.group(1),
+        "parent_session_id": parent_session_id,
+        "worker_session_id": child_session_id,
+        "worker_subagent_id": child_subagent_id,
+        "role": role_match.group(1).lower(),
+        "goal": child_goal,
+        "model": kwargs.get("child_model"),
     })
 
 
@@ -217,8 +283,10 @@ def subagent_stop(parent_session_id, child_status, child_summary=None, duration_
     child_session_id = kwargs.get("child_session_id") or kwargs.get("session_id")
     if child_session_id:
         client.request("POST", "/api/agent/worker-stop", {
-            "worker_session_id": child_session_id, "status": child_status,
-            "summary": child_summary or "", "duration_ms": duration_ms,
+            "worker_session_id": child_session_id,
+            "status": child_status,
+            "summary": child_summary or "",
+            "duration_ms": duration_ms,
         })
 
 
@@ -232,6 +300,11 @@ def _session_event(state: str, **kwargs):
         "model": kwargs.get("model") or kwargs.get("model_name"),
         "provider": kwargs.get("provider"),
         "surface": kwargs.get("surface") or kwargs.get("platform"),
+        "fallback": bool(
+            kwargs.get("fallback")
+            or kwargs.get("used_fallback")
+            or kwargs.get("model_fallback")
+        ),
     }, timeout=5)
 
 
@@ -282,12 +355,17 @@ def _approvals_command(raw_args: str = "") -> str:
             f"{len(item.get('decision_ids') or [])} actions | hash {digest[:12]} | "
             f"expires {item.get('expires_at')}"
         )
-    lines.append("批准：/ads-approve <approval_id> <hash前12位>")
-    lines.append("拒绝：/ads-reject <approval_id> <原因>")
+    if client.COMMAND_APPROVAL_ENABLED:
+        lines.append("批准：/ads-approve <approval_id> <hash前12位>")
+        lines.append("拒绝：/ads-reject <approval_id> <原因>")
+    else:
+        lines.append("当前命令审批已关闭。请登录 Amazon Ads Control Web 核对完整参数后批准或拒绝。")
     return "\n".join(lines)
 
 
 def _approve_command(raw_args: str = "") -> str:
+    if not client.COMMAND_APPROVAL_ENABLED:
+        return "Hermes 命令审批默认关闭。请登录 Amazon Ads Control Web 完成审批。"
     parts = raw_args.split()
     if len(parts) != 2:
         return "用法：/ads-approve <approval_id> <payload_hash前12位>"
@@ -300,28 +378,35 @@ def _approve_command(raw_args: str = "") -> str:
     if len(prefix) < 12 or not hmac_compare(prefix, payload_hash[:len(prefix)]):
         return "Payload Hash 不匹配，未批准。请重新查看 /ads-approvals。"
     confirmation = f"APPROVE {approval_id} {payload_hash[:12]}"
-    result = client.operator_request("POST", f"/api/operator/approvals/{approval_id}/approve", {
-        "payload_hash": payload_hash,
-        "confirmation": confirmation,
-        "actor": "hermes-user-command",
-    })
-    if result.get("error"):
-        return f"批准失败：{result.get('error')} {result.get('detail') or ''}".strip()
+    response = client.operator_request(
+        "POST",
+        f"/api/operator/approvals/{approval_id}/approve",
+        {
+            "payload_hash": payload_hash,
+            "confirmation": confirmation,
+            "actor": "hermes-user-command",
+        },
+    )
+    if response.get("error"):
+        return f"批准失败：{response.get('error')} {response.get('detail') or ''}".strip()
     return f"已批准计划 {approval_id}。授权仅绑定当前 Payload Hash，逐决策一次性消费。"
 
 
 def _reject_command(raw_args: str = "") -> str:
+    if not client.COMMAND_APPROVAL_ENABLED:
+        return "Hermes 命令审批默认关闭。请登录 Amazon Ads Control Web 完成审批。"
     parts = raw_args.strip().split(maxsplit=1)
     if not parts:
         return "用法：/ads-reject <approval_id> <原因>"
     approval_id = parts[0]
     reason = parts[1] if len(parts) > 1 else "operator rejected"
-    result = client.operator_request("POST", f"/api/operator/approvals/{approval_id}/reject", {
-        "reason": reason,
-        "actor": "hermes-user-command",
-    })
-    if result.get("error"):
-        return f"拒绝失败：{result.get('error')} {result.get('detail') or ''}".strip()
+    response = client.operator_request(
+        "POST",
+        f"/api/operator/approvals/{approval_id}/reject",
+        {"reason": reason, "actor": "hermes-user-command"},
+    )
+    if response.get("error"):
+        return f"拒绝失败：{response.get('error')} {response.get('detail') or ''}".strip()
     return f"已拒绝计划 {approval_id}。"
 
 
@@ -385,4 +470,7 @@ def register(ctx):
             handler=_reject_command,
             description="拒绝一个 Amazon Ads 高风险计划",
         )
-    ctx.register_skill(name="amazon-ads-autopilot", path=Path(__file__).parent / "skill" / "SKILL.md")
+    ctx.register_skill(
+        name="amazon-ads-autopilot",
+        path=Path(__file__).parent / "skill" / "SKILL.md",
+    )
