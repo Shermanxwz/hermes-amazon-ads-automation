@@ -112,15 +112,15 @@ class Environment:
         self.store.transition_report(job["id"], "SUBMITTED", {"report_id": report_id}, "test")
         self.store.transition_report(job["id"], "SUCCEEDED", {"report_id": report_id}, "test")
         content_hash = hashlib.sha256((report_id + "-content").encode()).hexdigest()
-        schema_hash = hashlib.sha256(b"test-schema-v3").hexdigest()
         normalized_hash = snapshot_hash(snapshot)
         self.store.transition_report(job["id"], "DOWNLOADED", {"content_hash": content_hash}, "test")
-        self.store.transition_report(job["id"], "VALIDATED", {"schema_hash": schema_hash}, "test")
+        self.store.transition_report(job["id"], "VALIDATED", {"snapshot": snapshot}, "test")
+        validated = self.store.get_report_job(job["id"])
         self.store.transition_report(job["id"], "INGESTED", {
             "content_hash": content_hash,
             "normalized_hash": normalized_hash,
-            "schema_hash": schema_hash,
-            "row_count": sum(len(snapshot.get(level, [])) for level in ("targets", "campaigns", "search_terms", "placements")),
+            "schema_hash": validated["schema_hash"],
+            "row_count": validated["row_count"],
         }, "test")
         return {"report_job_ids": [job["id"]], "action_ids": [], "normalized_hash": normalized_hash}
 
