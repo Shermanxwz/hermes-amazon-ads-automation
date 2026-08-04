@@ -32,6 +32,11 @@ class StorageMaintenanceTests(unittest.TestCase):
     def test_large_action_payload_is_bounded_but_keeps_report_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "state.db")
+            store.update_settings({"max_action_payload_bytes": 16384})
+            rows = [
+                {"reportId": "report-123", "row": index, "metrics": list(range(100))}
+                for index in range(100)
+            ]
             action_id = store.record_action(
                 decision_id=None,
                 task_id=None,
@@ -45,7 +50,7 @@ class StorageMaintenanceTests(unittest.TestCase):
                 success=True,
                 outcome_status="success",
                 structured_result=True,
-                result={"reportId": "report-123", "rows": [{"value": "x" * 300000}]},
+                result={"reportId": "report-123", "rows": rows},
             )
             action = store.get_action(action_id)
             self.assertTrue(action["result"]["_compacted"])
