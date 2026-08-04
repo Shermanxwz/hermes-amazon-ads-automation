@@ -19,6 +19,7 @@ PASSWORD = "correct horse battery staple"
 CREATE_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_create_campaign",
     "native_name": "campaign_management-create_campaign",
+    "source": "hermes-registry:na",
     "schema": {
         "description": "Create one campaign",
         "parameters": {
