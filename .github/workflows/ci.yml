@@ -8,7 +8,6 @@ permissions:
 
 jobs:
   apply-source:
-    if: ${{ hashFiles('.bootstrap/chunk-*') != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -19,6 +18,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$(find .bootstrap -maxdepth 1 -name 'chunk-*' -print -quit)"
           cat .bootstrap/chunk-* | base64 -d > "$RUNNER_TEMP/v21.patch.gz"
           echo "9778501b519e9f6fa727b3b07e91291e34183f37d5eda74e9ab6c5dd4c6ca285  $RUNNER_TEMP/v21.patch.gz" | sha256sum -c -
           gzip -dc "$RUNNER_TEMP/v21.patch.gz" > "$RUNNER_TEMP/v21.patch"
