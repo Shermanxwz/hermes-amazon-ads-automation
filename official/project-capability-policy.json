@@ -1,0 +1,150 @@
+{
+  "policy_version": 1,
+  "scope": "Amazon advertising operations only",
+  "allowed_modes": [
+    "routine_autonomous",
+    "operator_approved_atomic",
+    "bounded_data_job",
+    "read_only_context",
+    "compile_and_decompose",
+    "production_acceptance_only",
+    "permanently_blocked"
+  ],
+  "capabilities": {
+    "authentication": {
+      "mode": "production_acceptance_only",
+      "owner_evidence": "Login with Amazon OAuth consent, refresh and expiry recovery",
+      "notes": "Hermes owns OAuth tokens; the model never receives them."
+    },
+    "profiles": {
+      "mode": "read_only_context",
+      "owner_evidence": "NA/EU/FE Profile IDs, marketplace and currency",
+      "notes": "Profile identity and region are mandatory inputs to every write."
+    },
+    "sponsored_products": {
+      "mode": "routine_autonomous",
+      "owner_evidence": "Test Account or bounded canary plus independent read-back",
+      "notes": "Bounded mature optimization is autonomous; structural creation is separately approval-gated."
+    },
+    "sponsored_brands": {
+      "mode": "operator_approved_atomic",
+      "owner_evidence": "Live schema, creative eligibility and independent read-back",
+      "notes": "Reporting is supported; specialized creative/video/store decisions are not inferred."
+    },
+    "sponsored_display": {
+      "mode": "operator_approved_atomic",
+      "owner_evidence": "Live audience/target schema and independent read-back",
+      "notes": "Reporting is supported; view-through, frequency and audience strategy remain product-specific acceptance work."
+    },
+    "reporting": {
+      "mode": "bounded_data_job",
+      "owner_evidence": "Real submit, poll, GZIP download, schema and attribution backfill",
+      "notes": "Persistent lifecycle, lineage, dedupe, maturity and freshness are controller-enforced."
+    },
+    "marketing_stream": {
+      "mode": "bounded_data_job",
+      "owner_evidence": "Owner AWS delivery, dedupe and alert evidence",
+      "notes": "Used for monitoring and alerts, not as an unverified autonomous mutation source."
+    },
+    "recommendations": {
+      "mode": "operator_approved_atomic",
+      "owner_evidence": "Live recommendation type, expected state and verifier read-back",
+      "notes": "Recommendations are never blindly auto-applied."
+    },
+    "budget": {
+      "mode": "routine_autonomous",
+      "owner_evidence": "Bounded canary and full attribution-window review",
+      "notes": "Percentage, cumulative daily exposure and task/day limits apply."
+    },
+    "test_accounts": {
+      "mode": "production_acceptance_only",
+      "owner_evidence": "Credentialed Campaign hierarchy canary",
+      "notes": "Preferred proof surface for structural writes."
+    },
+    "exports": {
+      "mode": "bounded_data_job",
+      "owner_evidence": "Real asynchronous export lifecycle",
+      "notes": "No delivery mutation authority."
+    },
+    "manager_accounts": {
+      "mode": "read_only_context",
+      "owner_evidence": "Regional manager relationships and permissions",
+      "notes": "Manager/account administration mutations remain blocked."
+    },
+    "dsp_reporting": {
+      "mode": "read_only_context",
+      "owner_evidence": "Entity-scoped DSP report evidence",
+      "notes": "DSP campaign and creative writes are outside the current autonomous strategy engine."
+    },
+    "snapshots": {
+      "mode": "bounded_data_job",
+      "owner_evidence": "Real snapshot create, poll and download",
+      "notes": "Lineage and content validation required."
+    },
+    "amazon_marketing_cloud": {
+      "mode": "read_only_context",
+      "owner_evidence": "AMC entity/instance authorization and workflow evidence",
+      "notes": "AMC workflow/audience mutations are not autonomous in this advertising control plane."
+    },
+    "product_metadata": {
+      "mode": "read_only_context",
+      "owner_evidence": "Live product eligibility and metadata",
+      "notes": "May support planning; missing product facts are never invented."
+    },
+    "budget_rules": {
+      "mode": "operator_approved_atomic",
+      "owner_evidence": "Live rule schema, exact exposure and read-back",
+      "notes": "Complex rule creation is structural and approval-gated."
+    },
+    "creative_assets": {
+      "mode": "read_only_context",
+      "owner_evidence": "Asset ownership, moderation and association evidence",
+      "notes": "The system does not generate or silently replace creative assets."
+    },
+    "stores": {
+      "mode": "read_only_context",
+      "owner_evidence": "Store ownership and page eligibility",
+      "notes": "Store administration is not autonomous."
+    },
+    "locations": {
+      "mode": "read_only_context",
+      "owner_evidence": "Location ownership and targeting constraints",
+      "notes": "Location administration is not autonomous."
+    },
+    "sponsored_tv": {
+      "mode": "operator_approved_atomic",
+      "owner_evidence": "Live STV schema, creative eligibility and read-back",
+      "notes": "Data remains product-separated; no generic SP heuristic is presented as an STV expert strategy."
+    },
+    "partner_opportunities": {
+      "mode": "read_only_context",
+      "owner_evidence": "Live opportunity evidence",
+      "notes": "Opportunity data may inform explanation but does not bypass deterministic planning."
+    },
+    "mcp_end_to_end_campaign": {
+      "mode": "compile_and_decompose",
+      "owner_evidence": "Live workflow input/output schema and all resulting entity IDs",
+      "notes": "Direct black-box invocation is blocked; the system builds equivalent atomic Campaign, Ad Group, Target/Keyword and Ad decisions."
+    },
+    "mcp_locale_expansion": {
+      "mode": "compile_and_decompose",
+      "owner_evidence": "Source/target Profile regions, localization constraints and exact atomic plan",
+      "notes": "Cross-locale workflows cannot bypass regional Profile isolation or approval."
+    },
+    "billing_finance": {
+      "mode": "permanently_blocked",
+      "owner_evidence": null,
+      "notes": "Billing, invoices, payment and financial mutations are outside scope."
+    },
+    "account_administration": {
+      "mode": "permanently_blocked",
+      "owner_evidence": null,
+      "notes": "Users, roles, permissions, invitations and account links cannot be approved."
+    },
+    "irreversible_delete": {
+      "mode": "permanently_blocked",
+      "owner_evidence": null,
+      "notes": "Delete/archive/remove operations are never autonomous or approval-enabled."
+    }
+  }
+}
