@@ -48,6 +48,27 @@ class RegionalFailClosedTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_service_catalog_sync_preserves_validated_region_source(self):
+        tool = report_tool("hermes-registry:fe")
+        self.service.sync_catalog({"tools": [tool]})
+        self.assertEqual(
+            self.store.get_tool(tool["registered_name"])["source"],
+            "hermes-registry:fe",
+        )
+
+    def test_service_catalog_sync_rejects_untrusted_source_names(self):
+        tool = report_tool("user-supplied:fe")
+        with self.assertRaisesRegex(ValueError, "source must be one of"):
+            self.service.sync_catalog({"tools": [tool]})
+
+    def test_service_catalog_sync_without_source_remains_untagged(self):
+        tool = report_tool("")
+        self.service.sync_catalog({"tools": [tool]})
+        self.assertEqual(
+            self.store.get_tool(tool["registered_name"])["source"],
+            "hermes-registry",
+        )
+
     def test_untagged_profile_discovery_is_blocked(self):
         tool = account_discovery("hermes-registry")
         self.store.sync_catalog([descriptor_from_payload(tool)])
