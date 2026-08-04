@@ -57,6 +57,11 @@ run_required amazon_mcp "Offline MCP initialize/tools-list/schema/authority fixt
 run_required amazon_postman "Official Postman semantic compiler and strict capability matrix" \
   python3 "$ROOT/scripts/sync_official_contracts.py" \
     --check --strict-extended --output "$ARTIFACT_DIR/postman-capabilities.json"
+run_required amazon_postman "Every official capability has an explicit project policy" \
+  python3 "$ROOT/scripts/check_project_capability_policy.py" \
+    --manifest "$ARTIFACT_DIR/postman-capabilities.json" \
+    --policy "$ROOT/official/project-capability-policy.json" \
+    --output "$ARTIFACT_DIR/project-capability-policy.json"
 run_required amazon_postman "Official Postman fingerprint drift gate" \
   python3 "$ROOT/scripts/check_official_fingerprint.py" \
     --manifest "$ARTIFACT_DIR/postman-capabilities.json" \
