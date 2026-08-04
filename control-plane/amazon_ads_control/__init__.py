@@ -19,6 +19,7 @@ from .api_extension import install as _install_api_extension
 from .approval_gate import install as _install_approval_gate
 from .approval_hardening import install as _install_approval_hardening
 from .structural_execution import install as _install_structural_execution
+from .structural_hardening import install as _install_structural_hardening
 from .hermes_compat import install as _install_hermes_compat
 from .hermes_lifecycle import install as _install_hermes_lifecycle
 _install_report_evidence_hardening()
@@ -30,6 +31,7 @@ _install_api_extension()
 _install_approval_gate()
 _install_approval_hardening()
 _install_structural_execution()
+_install_structural_hardening()
 _install_hermes_compat()
 _install_hermes_lifecycle()
 
@@ -37,4 +39,5 @@ del _install_closed_loop, _install_closed_loop_fixes, _install_strategy_hardenin
 del _install_report_evidence_hardening, _install_callback_hardening
 del _install_task_hardening, _install_storage_maintenance, _install_storage_alert_rollup
 del _install_api_extension, _install_approval_gate, _install_approval_hardening
-del _install_structural_execution, _install_hermes_compat, _install_hermes_lifecycle
+del _install_structural_execution, _install_structural_hardening
+del _install_hermes_compat, _install_hermes_lifecycle
