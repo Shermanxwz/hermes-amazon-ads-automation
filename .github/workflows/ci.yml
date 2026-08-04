@@ -104,6 +104,11 @@ jobs:
           --strict-extended
           --output official/postman-capabilities.ci.json
       - run: >-
+          python scripts/check_project_capability_policy.py
+          --manifest official/postman-capabilities.ci.json
+          --policy official/project-capability-policy.json
+          --output official/project-capability-policy.ci.json
+      - run: >-
           python scripts/check_official_fingerprint.py
           --manifest official/postman-capabilities.ci.json
           --baseline official/postman-semantic-baseline.json
