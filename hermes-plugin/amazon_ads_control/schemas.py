@@ -62,7 +62,7 @@ CREATE_TASK = {
 }
 MANAGED_PLAN = {
     "name": "ads_control_create_managed_plan",
-    "description": "Create a payload-bound high-risk structural plan from live Amazon MCP schemas. The AI can request approval but can never approve its own plan.",
+    "description": "Create a payload-bound high-risk structural plan from live Amazon MCP schemas. The AI can request approval but can never approve its own plan. Later actions may reference an earlier action's resolved Amazon ID with {{decision:<plan_key>.entity_id}} and must declare that plan_key in depends_on.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -90,6 +90,13 @@ MANAGED_PLAN = {
                         "action_type": {"type": "string"},
                         "entity_type": {"type": "string"},
                         "entity_id": {"type": "string"},
+                        "plan_key": {"type": "string", "minLength": 1, "maxLength": 240},
+                        "depends_on": {
+                            "type": "array",
+                            "maxItems": 49,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 240},
+                        },
                         "arguments": {"type": "object"},
                         "expected_state": {"type": "object", "minProperties": 1},
                         "reason": {"type": "string"},
