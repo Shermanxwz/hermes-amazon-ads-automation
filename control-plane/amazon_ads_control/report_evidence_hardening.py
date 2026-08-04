@@ -69,6 +69,7 @@ def install() -> None:
     Store = db_module.Store
     Service = service_module.ControlService
     original_init = Store.__init__
+    original_store_transition = Store.transition_report
     original_transition = Service.transition_report
     original_validate_lineage = Store.validate_snapshot_lineage
 
@@ -76,6 +77,23 @@ def install() -> None:
         original_init(self, path)
         with self.connection() as conn:
             db_module.Store._ensure_column(conn, "report_jobs", "normalized_snapshot_json", "TEXT")
+
+    def store_transition(self, identifier: str, new_status: str, data: dict[str, Any], actor: str = "hermes-main"):
+        data = dict(data or {})
+        snapshot = data.get("snapshot")
+        if str(new_status).upper() == "VALIDATED" and isinstance(snapshot, dict):
+            data["normalized_hash"] = snapshot_hash(snapshot)
+            data["schema_hash"] = canonical_hash(data.get("schema") or _schema_fingerprint(snapshot))
+            data["row_count"] = _row_count(snapshot)
+        result = original_store_transition(self, identifier, new_status, data, actor)
+        if str(new_status).upper() == "VALIDATED" and isinstance(snapshot, dict):
+            with self.connection() as conn:
+                conn.execute(
+                    "UPDATE report_jobs SET normalized_snapshot_json=? WHERE id=?",
+                    (json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str), result["id"]),
+                )
+            result = self.get_report_job(result["id"]) or result
+        return result
 
     def report_evidence(self, payload: dict[str, Any]) -> dict[str, Any]:
         session_id = str(payload.get("session_id") or "").strip()
@@ -139,15 +157,6 @@ def install() -> None:
             normalized = data.get("snapshot")
             if not isinstance(normalized, dict):
                 raise ValueError("VALIDATED report requires the normalized snapshot object")
-            computed_hash = snapshot_hash(normalized)
-            data["normalized_hash"] = computed_hash
-            data["schema_hash"] = canonical_hash(data.get("schema") or _schema_fingerprint(normalized))
-            data["row_count"] = _row_count(normalized)
-            with self.store.connection() as conn:
-                conn.execute(
-                    "UPDATE report_jobs SET normalized_snapshot_json=? WHERE id=?",
-                    (json.dumps(normalized, ensure_ascii=False, sort_keys=True, default=str), job["id"]),
-                )
         if status == "INGESTED":
             current = self.store.get_report_job(job["id"]) or {}
             with self.store.connection() as conn:
@@ -181,6 +190,7 @@ def install() -> None:
         return normalized
 
     Store.__init__ = init
+    Store.transition_report = store_transition
     Store.validate_snapshot_lineage = validate_snapshot_lineage
     Service.report_evidence = report_evidence
     Service.transition_report = transition_report
