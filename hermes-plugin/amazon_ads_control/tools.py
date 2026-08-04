@@ -9,14 +9,28 @@ def _session(kwargs):
 
 
 def sync_catalog(**kwargs):
-    # Actual registry collection lives in the plugin module so hooks and this tool share a cache.
     from . import sync_live_catalog
     return json.dumps(sync_live_catalog(force=True), ensure_ascii=False)
 
 
-def plan_cycle(snapshot, policy=None, **kwargs):
+def create_report_job(spec, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/reports", {
+        "spec": spec, "actor": "hermes-main",
+    }, timeout=20), ensure_ascii=False)
+
+
+def transition_report(report_job_id, status, data=None, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/reports/transition", {
+        "report_job_id": report_job_id,
+        "status": status,
+        "data": data or {},
+        "actor": "hermes-main",
+    }, timeout=20), ensure_ascii=False)
+
+
+def plan_cycle(snapshot, lineage, policy=None, **kwargs):
     return json.dumps(client.request("POST", "/api/agent/cycles/plan", {
-        "snapshot": snapshot, "policy": policy or {}, "actor": "hermes-main",
+        "snapshot": snapshot, "lineage": lineage, "policy": policy or {}, "actor": "hermes-main",
         "parent_session_id": _session(kwargs),
     }, timeout=30), ensure_ascii=False)
 
@@ -35,6 +49,14 @@ def record_note(message, task_id=None, level="info", **kwargs):
     return json.dumps(client.request("POST", "/api/agent/events", {
         "level": level, "type": "agent.note", "actor": "hermes", "task_id": task_id,
         "message": message, "data": {"session_id": _session(kwargs)},
+    }), ensure_ascii=False)
+
+
+def prepare_write(decision_id, evidence_action_id, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/prepare-write", {
+        "decision_id": decision_id,
+        "evidence_action_id": evidence_action_id,
+        "session_id": _session(kwargs),
     }), ensure_ascii=False)
 
 
