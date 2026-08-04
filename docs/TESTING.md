@@ -2,6 +2,18 @@
 
 The repository separates evidence into four layers. A green lower layer must never be described as proof of a higher layer.
 
+## Complete gate
+
+From a real checkout, run:
+
+```bash
+bash scripts/run_full_sandbox.sh
+```
+
+It composes the repository suite, MCP fixture audit, official Postman semantic compiler, capability-policy completeness, fingerprint drift, endpoint reachability, stress/recovery and every locally available quality, deployment, browser and pinned-Hermes check. It writes separate `PASS`, `FAIL` and `EXTERNAL` results to `artifacts/full-sandbox/`.
+
+Set `FULL_SANDBOX_LIVE_MCP=1` and provide an owner access token only when running the credentialed MCP contract gate. The token is never written to generated manifests.
+
 ## 1. Deterministic unit and integration suite
 
 ```bash
@@ -13,6 +25,7 @@ The suite runs with Python development mode and warnings promoted to errors. It 
 
 - strategy decisions, attribution and data-quality gates;
 - live Catalog drift/removal and JSON Schema validation;
+- MCP initialize/tools-list/schema/authority fixture behavior;
 - Main/Executor/Verifier authority and different-Session enforcement;
 - atomic reservation, expired-write quarantine and structured outcomes;
 - report lineage and recorded Amazon read evidence;
@@ -26,6 +39,9 @@ The suite runs with Python development mode and warnings promoted to errors. It 
 - parent-ID and argument tamper rejection;
 - missing/ambiguous created-ID quarantine;
 - approval supersession, partial-plan rejection and after-expiry completion semantics;
+- single-entity batch enforcement while allowing one Target's legitimate multi-condition expression;
+- Hermes discovery of canonical and explicitly named NA/EU/FE MCP Toolsets;
+- Profile-to-region isolation for reads, reports, Executor writes and Verifier reads;
 - migration, backup, Marketing Stream retries/deduplication and storage pressure;
 - independent-process Main → Executor → Verifier flows.
 
@@ -43,6 +59,7 @@ Deployment validation:
 - builds and installs the 3.2 wheel into a fresh virtual environment;
 - checks all installed CLIs and version output;
 - validates machine/operator credential separation;
+- validates regional MCP environment declarations;
 - validates runtime configuration and full database integrity;
 - runs the source installer and checks the Hermes plugin link;
 - parses Nginx configuration;
@@ -61,9 +78,12 @@ GitHub Actions is configured to:
 - install the real `hermes-agent==0.18.2` package;
 - load the plugin using Hermes' real `PluginManager`;
 - assert all 15 tools, ten Hooks, three Slash Commands and the namespaced Skill;
+- prove real Hermes loads with no Operator Token and Web-only approval by default;
 - test command approval disabled-by-default behavior and fallback telemetry;
 - download Amazon's current public Advanced Tools Postman collection;
 - enforce the accepted semantic API fingerprint and capability set;
+- require an explicit project policy for every discovered official capability;
+- execute the MCP initialize/tools-list/schema/authority fixture;
 - check the protected Amazon Ads MCP endpoint;
 - repeat package/deployment and stress/recovery validation on Ubuntu.
 
@@ -74,9 +94,10 @@ A workflow conclusion without allocated Runner steps or downloadable logs is not
 The following cannot be proven by repository CI and remain release-blocking evidence for the owner's environment:
 
 - Amazon OAuth authorization, refresh and expiry recovery;
-- authenticated MCP `initialize` and `tools/list`;
-- visible Profiles, manager-account relationships and permissions;
-- the owner's exact live Amazon Ads MCP names and Schemas;
+- authenticated MCP `initialize` and every paginated `tools/list` page;
+- visible regional Profiles, manager-account relationships and permissions;
+- the owner's exact live Amazon Ads MCP names, descriptions, Schemas and hashes;
+- proof that each regional tool source matches its NA/EU/FE Profile;
 - report creation, polling, download, decompression, parsing and attribution backfill;
 - real 429/rate-limit and timeout behavior;
 - real Amazon response envelopes for Campaign, Ad Group, Target, Keyword and Product Ad creation;
@@ -89,4 +110,4 @@ The following cannot be proven by repository CI and remain release-blocking evid
 - Hermes Gateway interaction checks on every surface actually used;
 - VPS reboot, systemd, storage soak and backup/restore drill.
 
-Mock, static or synthetic results must never be recorded as successful credentialed acceptance. See `PRODUCTION_ACCEPTANCE.md` for the exact checklist.
+Mock, static or synthetic results must never be recorded as successful credentialed acceptance. See `PRODUCTION_ACCEPTANCE.md` and `AMAZON_MCP_HERMES_AUDIT.md` for the exact evidence model.
