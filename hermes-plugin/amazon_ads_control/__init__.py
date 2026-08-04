@@ -196,6 +196,7 @@ def register(ctx):
     registrations = (
         ("ads_control_sync_catalog", schemas.SYNC_CATALOG, tools.sync_catalog),
         ("ads_control_create_report_job", schemas.CREATE_REPORT, tools.create_report_job),
+        ("ads_control_report_evidence", schemas.REPORT_EVIDENCE, tools.report_evidence),
         ("ads_control_transition_report", schemas.TRANSITION_REPORT, tools.transition_report),
         ("ads_control_plan_cycle", schemas.PLAN_CYCLE, tools.plan_cycle),
         ("ads_control_create_task", schemas.CREATE_TASK, tools.create_task),
