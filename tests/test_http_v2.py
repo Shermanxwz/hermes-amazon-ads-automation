@@ -1,6 +1,5 @@
 from http.cookiejar import CookieJar
 from pathlib import Path
-import hashlib
 import json
 import tempfile
 import threading
@@ -12,7 +11,7 @@ from amazon_ads_control.api import build_server
 from amazon_ads_control.config import Settings
 from amazon_ads_control.reporting import snapshot_hash
 from amazon_ads_control.security import hash_password
-from helpers import WRITE_TARGET, one_target_snapshot
+from helpers import REPORT_CREATE, WRITE_TARGET, one_target_snapshot
 
 
 class HttpV2Tests(unittest.TestCase):
@@ -39,15 +38,26 @@ class HttpV2Tests(unittest.TestCase):
             "profile_id":snapshot["profile"]["profile_id"],"report_type":"http-test","start_date":window["start"],"end_date":window["end"],"timezone":"UTC","ad_product":"SPONSORED_PRODUCTS"
         }},auth); self.assertEqual(status,201)
         report_id="r-"+job["id"]
+        status,allowed,_=self.request("/api/agent/tool-check","POST",{
+            "tool_name":REPORT_CREATE["registered_name"],"args":{"reportTypeId":"http-test"},"session_id":"main","tool_call_id":"report-action"
+        },auth); self.assertEqual(status,200); self.assertTrue(allowed["allowed"])
+        status,recorded,_=self.request("/api/agent/tool-result","POST",{
+            "tool_name":REPORT_CREATE["registered_name"],"args":{"reportTypeId":"http-test"},
+            "result":{"reportId":report_id,"status":"SUCCESS","rows":[{"targetId":"t1"}]},
+            "session_id":"main","tool_call_id":"report-action"
+        },auth); self.assertEqual(status,200)
+        evidence_id=recorded["action_id"]
         for state,data in (
             ("SUBMITTED",{"report_id":report_id}),
-            ("SUCCEEDED",{"report_id":report_id}),
-            ("DOWNLOADED",{"content_hash":hashlib.sha256(b"content").hexdigest()}),
-            ("VALIDATED",{"schema_hash":hashlib.sha256(b"schema").hexdigest()}),
-            ("INGESTED",{"content_hash":hashlib.sha256(b"content").hexdigest(),"schema_hash":hashlib.sha256(b"schema").hexdigest(),"normalized_hash":snapshot_hash(snapshot),"row_count":1}),
+            ("SUCCEEDED",{}),
+            ("DOWNLOADED",{}),
+            ("VALIDATED",{"snapshot":snapshot}),
+            ("INGESTED",{}),
         ):
-            status,job,_=self.request("/api/agent/reports/transition","POST",{"report_job_id":job["id"],"status":state,"data":data},auth); self.assertEqual(status,200)
-        return {"report_job_ids":[job["id"]],"normalized_hash":snapshot_hash(snapshot),"action_ids":[]}
+            payload={"report_job_id":job["id"],"status":state,"data":data,"session_id":"main"}
+            if state in {"SUBMITTED","SUCCEEDED","DOWNLOADED"}: payload["evidence_action_id"]=evidence_id
+            status,job,_=self.request("/api/agent/reports/transition","POST",payload,auth); self.assertEqual(status,200)
+        return {"report_job_ids":[job["id"]],"normalized_hash":snapshot_hash(snapshot),"action_ids":[evidence_id]}
 
     def test_health_and_static(self):
         self.assertEqual(self.request("/health/live")[0],200)
@@ -68,8 +78,9 @@ class HttpV2Tests(unittest.TestCase):
 
     def test_agent_catalog_plan_and_views(self):
         auth={"Authorization":"Bearer "+"a"*48}
-        self.assertEqual(self.request("/api/agent/catalog-sync","POST",{"tools":[WRITE_TARGET]},auth)[0],200)
+        self.assertEqual(self.request("/api/agent/catalog-sync","POST",{"tools":[WRITE_TARGET,REPORT_CREATE]},auth)[0],200)
         snapshot=one_target_snapshot(); lineage=self.lineage(snapshot,auth)
+        status,evidence,_=self.request("/api/agent/report-evidence","POST",{"session_id":"main"},auth); self.assertEqual(status,200); self.assertEqual(evidence["evidence"][0]["id"],lineage["action_ids"][0])
         status,cycle,_=self.request("/api/agent/cycles/plan","POST",{"snapshot":snapshot,"lineage":lineage},auth); self.assertEqual(status,201); self.assertEqual(len(cycle["decisions"]),1)
         status,task,_=self.request("/api/agent/tasks","POST",{"cycle_id":cycle["id"]},auth); self.assertEqual(status,201); self.assertIn("id",task)
         self.login(); self.assertEqual(self.request("/api/cycles",opener=self.browser)[0],200); self.assertEqual(self.request("/api/decisions",opener=self.browser)[0],200); self.assertEqual(self.request("/api/reports",opener=self.browser)[0],200)
