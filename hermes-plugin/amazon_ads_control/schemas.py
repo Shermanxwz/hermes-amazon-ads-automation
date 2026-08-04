@@ -47,17 +47,29 @@ NOTE = {
         "required": ["message"],
     },
 }
-VERIFY = {
-    "name": "ads_control_verify_decision",
-    "description": "Verifier-only: compare a fresh independent Amazon read with the deterministic expected state for one executed decision.",
+READ_EVIDENCE = {
+    "name": "ads_control_read_evidence",
+    "description": "Verifier-only: list recent structured Amazon read actions that can serve as independent evidence for one decision.",
     "parameters": {
         "type": "object",
         "properties": {
             "decision_id": {"type": "string"},
-            "actual": {"type": "object"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+        "required": ["decision_id"],
+    },
+}
+VERIFY = {
+    "name": "ads_control_verify_decision",
+    "description": "Verifier-only: verify one decision from a recorded, fresh, structured Amazon read action. Arbitrary model-supplied state is not accepted.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "decision_id": {"type": "string"},
+            "evidence_action_id": {"type": "integer", "minimum": 1},
             "message": {"type": "string"},
         },
-        "required": ["decision_id", "actual"],
+        "required": ["decision_id", "evidence_action_id"],
     },
 }
 FINALIZE = {

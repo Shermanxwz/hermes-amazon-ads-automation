@@ -8,13 +8,15 @@ import json
 from typing import Any, Iterable
 
 UTC = timezone.utc
+TRUSTED_SOURCES = {"amazon-ads-mcp", "amazon-ads-api", "amazon-ads-report", "amazon-marketing-stream"}
 
 
 def _d(value: Any, default: str = "0") -> Decimal:
     if value is None or value == "":
         return Decimal(default)
     try:
-        return Decimal(str(value))
+        parsed = Decimal(str(value))
+        return parsed if parsed.is_finite() else Decimal(default)
     except (InvalidOperation, ValueError, TypeError):
         return Decimal(default)
 
@@ -179,23 +181,32 @@ class OptimizationEngine:
         window = snapshot.get("window") if isinstance(snapshot.get("window"), dict) else {}
         start = str(window.get("start") or "")
         end = str(window.get("end") or "")
-        days = int(window.get("days") or 0)
-        if not days and start and end:
-            try:
-                days = max(1, (datetime.fromisoformat(end) - datetime.fromisoformat(start)).days + 1)
-            except ValueError:
-                days = 0
-        source = str(snapshot.get("source") or "unknown")
-        missing = []
+        try:
+            declared_days = int(window.get("days") or 0)
+        except (TypeError, ValueError):
+            declared_days = 0
+        days = declared_days
+        source = str(snapshot.get("source") or "unknown").strip().lower()
+        missing: list[str] = []
         end_age_days = None
         mature = False
+        if source not in TRUSTED_SOURCES:
+            missing.append("untrusted_source")
         if start and end:
             try:
+                start_date = datetime.fromisoformat(start).date()
                 end_date = datetime.fromisoformat(end).date()
+                if start_date > end_date:
+                    missing.append("window_start_after_end")
+                derived_days = max(0, (end_date - start_date).days + 1)
+                if declared_days and declared_days != derived_days:
+                    missing.append("window_days_mismatch")
+                days = derived_days
                 end_age_days = (datetime.now(UTC).date() - end_date).days
                 mature = end_age_days >= policy.attribution_lag_days
             except ValueError:
                 missing.append("invalid_window_date")
+                days = 0
         if not start or not end:
             missing.append("window")
         if days < policy.min_window_days:
@@ -204,8 +215,22 @@ class OptimizationEngine:
             missing.append("attribution_not_mature")
         if end_age_days is not None and end_age_days > policy.max_data_age_days:
             missing.append("data_too_stale")
-        if not isinstance(snapshot.get("targets", []), list):
+        targets = snapshot.get("targets", [])
+        if not isinstance(targets, list):
             missing.append("targets")
+        else:
+            target_ids = [
+                str(row.get("target_id") or row.get("keyword_id") or row.get("id") or "")
+                for row in targets if isinstance(row, dict)
+            ]
+            nonempty = [item for item in target_ids if item]
+            if len(nonempty) != len(set(nonempty)):
+                missing.append("duplicate_target_ids")
+        account = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else {}
+        for field in ("impressions", "clicks", "spend", "sales", "orders"):
+            raw = account.get(field)
+            if raw is not None and (_d(raw) < 0 or str(raw).strip().lower() in {"nan", "inf", "infinity", "-inf", "-infinity"}):
+                missing.append(f"invalid_account_{field}")
         eligible = not missing
         return {
             "source": source,
@@ -440,7 +465,8 @@ class OptimizationEngine:
             entity_id = str(row.get("entity_id") or row.get("campaign_id") or row.get("target_id") or rec_id)
             expires = row.get("expires_at") or row.get("expiry_date")
             payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-            if not rec_id or not entity_id:
+            expected_state = row.get("expected_state") if isinstance(row.get("expected_state"), dict) else {}
+            if not rec_id or not entity_id or not expected_state:
                 continue
             out.append(Decision(
                 profile_id=profile_id, entity_type="recommendation", entity_id=entity_id,
@@ -450,7 +476,7 @@ class OptimizationEngine:
                 payload={
                     "recommendation_id": rec_id, "recommendation_type": rec_type, "provider_payload": payload,
                     "match_fields": {"recommendation_id|recommendationId": rec_id},
-                    "expected_state": row.get("expected_state") if isinstance(row.get("expected_state"), dict) else {},
+                    "expected_state": expected_state,
                 },
                 expected_family="recommendation", risk="medium",
             ))
@@ -470,9 +496,13 @@ class OptimizationEngine:
     @staticmethod
     def _dedupe(decisions: list[Decision]) -> list[Decision]:
         # Higher-priority action wins per entity/action family. Exact plan keys remain deterministic.
-        best: dict[tuple[str, str, str], Decision] = {}
+        best: dict[tuple[str, str, str, str, str], Decision] = {}
         for decision in decisions:
-            key = (decision.entity_type, decision.entity_id, decision.action_type)
+            payload = decision.payload if isinstance(decision.payload, dict) else {}
+            key = (
+                decision.entity_type, decision.entity_id, decision.action_type,
+                str(payload.get("campaign_id") or ""), str(payload.get("ad_group_id") or ""),
+            )
             if key not in best or decision.priority > best[key].priority:
                 best[key] = decision
         return sorted(best.values(), key=lambda item: (-item.priority, item.entity_type, item.entity_id))

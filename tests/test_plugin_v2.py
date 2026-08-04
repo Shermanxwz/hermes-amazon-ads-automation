@@ -77,5 +77,63 @@ class PluginV2Tests(unittest.TestCase):
 
     def test_register_contract(self):
         ctx=FakeCtx(); self.plugin.register(ctx)
-        self.assertEqual(len(ctx.tools),8); self.assertIn("pre_tool_call",ctx.hooks); self.assertTrue(ctx.skills["amazon-ads-autopilot"].name=="SKILL.md")
+        self.assertEqual(len(ctx.tools),9); self.assertIn("pre_tool_call",ctx.hooks); self.assertTrue(ctx.skills["amazon-ads-autopilot"].name=="SKILL.md")
         with self.assertRaises(ValueError): ctx.tools["ads_control_status"]("bad")
+
+    def test_pre_llm_context_and_unavailable_message(self):
+        with patch.object(self.plugin,"sync_live_catalog",return_value={"tool_count":2}), patch.object(self.plugin.client,"context",return_value={"role":"main","mode":"observe","execution_enabled":False,"catalog":{"tools":2},"task":None,"decisions":[],"instructions":"read only"}):
+            result=self.plugin.pre_llm_call(session_id="main")
+        self.assertIn("Amazon Ads Control v2",result["context"]); self.assertIn("read only",result["context"])
+        with patch.object(self.plugin,"sync_live_catalog",return_value={"error":"x"}), patch.object(self.plugin.client,"context",return_value={"error":"down"}):
+            result=self.plugin.pre_llm_call(session_id="main")
+        self.assertIn("禁止调用",result["context"])
+
+    def test_unbound_and_stopped_subagents_are_audited(self):
+        calls=[]
+        with patch.object(self.plugin.client,"request",side_effect=lambda m,p,payload=None,timeout=4: calls.append((p,payload)) or {}):
+            self.plugin.subagent_start("parent","child","sub","leaf","missing markers")
+            self.plugin.subagent_stop("parent","completed","done",10,child_session_id="child")
+        self.assertEqual(calls[0][0],"/api/agent/events")
+        self.assertEqual(calls[1][0],"/api/agent/worker-stop")
+
+    def test_tool_wrappers_preserve_sessions_and_payloads(self):
+        calls=[]
+        def request(method,path,payload=None,timeout=4):
+            calls.append((method,path,payload,timeout)); return {"ok":True}
+        with patch.object(self.plugin.client,"request",side_effect=request), patch.object(self.plugin.client,"context",return_value={"role":"main"}):
+            self.assertIn('"ok": true',self.plugin.tools.plan_cycle({"profile":{}},{"target_acos":30},session_id="s"))
+            self.plugin.tools.create_task("cycle",7,turn_id="turn")
+            self.assertIn("main",self.plugin.tools.status(session_id="s"))
+            self.plugin.tools.record_note("note",task_id="task",session_id="s")
+            self.plugin.tools.read_evidence("d",5,session_id="v")
+            self.plugin.tools.verify_decision("d",12,"ok",session_id="v")
+            self.plugin.tools.finalize_task("task","done",session_id="s")
+            self.plugin.tools.ingest_stream_events([{"id":1}],session_id="s")
+        paths=[item[1] for item in calls]
+        self.assertEqual(paths,["/api/agent/cycles/plan","/api/agent/tasks","/api/agent/events","/api/agent/read-evidence","/api/agent/verify","/api/agent/task-finalize","/api/agent/stream-events"])
+        self.assertEqual(calls[0][2]["parent_session_id"],"s")
+        self.assertEqual(calls[1][2]["parent_session_id"],"turn")
+
+class PluginClientTests(unittest.TestCase):
+    def setUp(self):
+        tools_pkg=types.ModuleType("tools"); registry_mod=types.ModuleType("tools.registry"); registry_mod.registry=FakeRegistry(); tools_pkg.registry=registry_mod
+        self.modules=patch.dict(sys.modules,{"tools":tools_pkg,"tools.registry":registry_mod}); self.modules.start(); self.plugin=load_plugin()
+    def tearDown(self): self.modules.stop()
+    def test_decode_request_and_context_failures(self):
+        from io import BytesIO
+        from urllib.error import HTTPError, URLError
+        class Response:
+            status=200
+            def __init__(self,body): self.body=body
+            def __enter__(self): return self
+            def __exit__(self,*_): return False
+            def read(self): return self.body
+        client=self.plugin.client
+        self.assertEqual(client._decode(b"[]")["error"],"invalid_control_response")
+        self.assertEqual(client._decode(b"bad")["error"],"invalid_control_response")
+        with patch.object(client,"urlopen",return_value=Response(b'{"ok":true}')):
+            self.assertTrue(client.request("GET","/ok")["ok"])
+        with patch.object(client,"urlopen",side_effect=HTTPError("u",403,"bad",{},BytesIO(b'{"error":"blocked"}'))):
+            self.assertEqual(client.request("GET","/x")["http_status"],403)
+        with patch.object(client,"urlopen",side_effect=URLError("down")):
+            self.assertEqual(client.context("session with space")["error"],"control_plane_unavailable")

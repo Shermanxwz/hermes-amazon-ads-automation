@@ -1,6 +1,6 @@
 {
   "package": "hermes-amazon-ads-automation",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "scope": "Amazon advertising operations only",
   "runtime": {
     "control_plane": "Python 3.11+ standard library",
@@ -17,11 +17,20 @@
     "independent read-only verifier",
     "structured partial/pending/failure outcome handling",
     "Marketing Stream dedupe and operational alerts",
-    "immutable safety gates and transparent audit history"
+    "immutable safety gates and transparent audit history",
+    "recorded post-write read evidence bound to verifier session and action ID",
+    "expired/partial/unknown write quarantine without blind replay",
+    "atomic SQLite backup and integrity verification",
+    "historical/shadow deterministic replay CLI",
+    "browser, stress, deployment, quality and branch-coverage CI gates"
   ],
   "production_acceptance_required": [
-    "owner Amazon Ads OAuth",
-    "visible profiles and permissions",
-    "Amazon Ads Test Account or controlled real-account write verification"
+    "owner Amazon Ads OAuth and refresh recovery",
+    "visible profiles, manager relationships and permissions",
+    "live report lifecycle and attribution backfills",
+    "owner AWS Marketing Stream delivery",
+    "historical replay plus sustained OBSERVE shadow review",
+    "Amazon Ads Test Account or controlled real-account canary with independent verifier readback",
+    "actual VPS HTTPS, reboot and backup-restore drill"
   ]
 }

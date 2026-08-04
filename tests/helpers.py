@@ -15,6 +15,11 @@ READ_CAMPAIGN = {
     "native_name": "campaign_management-query_campaign",
     "schema": {"name": "query campaign", "description": "Query campaigns", "parameters": {"type": "object"}},
 }
+READ_TARGET = {
+    "registered_name": "mcp_amazon_ads_campaign_management_query_target",
+    "native_name": "campaign_management-query_target",
+    "schema": {"name": "query target", "description": "Query target", "parameters": {"type": "object", "properties": {"targetId": {"type": "string"}}}},
+}
 WRITE_TARGET = {
     "registered_name": "mcp_amazon_ads_campaign_management_update_target",
     "native_name": "campaign_management-update_target",
@@ -77,7 +82,7 @@ class Environment:
         self.temp.cleanup()
 
     def sync_basic_catalog(self):
-        return self.store.sync_catalog([descriptor_from_payload(READ_CAMPAIGN), descriptor_from_payload(WRITE_TARGET), descriptor_from_payload(WRITE_CAMPAIGN), descriptor_from_payload(REPORT_CREATE), descriptor_from_payload(CRITICAL_ACCOUNT)])
+        return self.store.sync_catalog([descriptor_from_payload(READ_CAMPAIGN), descriptor_from_payload(READ_TARGET), descriptor_from_payload(WRITE_TARGET), descriptor_from_payload(WRITE_CAMPAIGN), descriptor_from_payload(REPORT_CREATE), descriptor_from_payload(CRITICAL_ACCOUNT)])
 
     def one_decision_task(self, *, autopilot=True):
         self.sync_basic_catalog()

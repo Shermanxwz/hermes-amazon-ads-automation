@@ -32,6 +32,8 @@ SAFETY_LOCKED_SETTINGS: dict[str, Any] = {
     "max_write_batch_size": 1,
     "block_deletes": True,
     "block_account_admin": True,
+    "block_high_risk_writes": True,
+    "require_read_evidence_verification": True,
 }
 
 
@@ -54,6 +56,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "max_campaign_creates_per_day": 2,
     "block_deletes": True,
     "block_account_admin": True,
+    "block_high_risk_writes": True,
+    "max_placement_change_points": 25,
     "target_acos": 30,
     "max_acos": 45,
     "min_clicks": 8,
@@ -78,6 +82,57 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "allow_campaign_creation": False,
     "allow_official_recommendation_apply": False,
     "recommendation_types": ["BID", "BUDGET", "KEYWORD", "TARGET"],
+    "max_decision_age_minutes": 180,
+    "read_evidence_max_age_seconds": 600,
+    "require_read_evidence_verification": True,
+}
+
+
+BOOLEAN_SETTINGS = {
+    "execution_enabled", "allow_data_jobs", "allow_bid_changes", "allow_budget_changes",
+    "allow_negatives", "allow_harvest", "allow_placement_changes", "allow_campaign_creation",
+    "allow_official_recommendation_apply", *SAFETY_LOCKED_SETTINGS.keys(),
+}
+INTEGER_SETTING_RANGES: dict[str, tuple[int, int]] = {
+    "reservation_ttl_seconds": (30, 86400),
+    "decision_cooldown_hours": (1, 8760),
+    "max_write_batch_size": (1, 1),
+    "max_data_jobs_per_day": (1, 10000),
+    "max_actions_per_task": (1, 10000),
+    "max_actions_per_day": (1, 100000),
+    "max_campaign_creates_per_day": (1, 1000),
+    "min_clicks": (0, 1000000),
+    "min_orders": (0, 1000000),
+    "waste_clicks": (0, 1000000),
+    "harvest_orders": (0, 1000000),
+    "attribution_lag_days": (0, 90),
+    "min_window_days": (1, 365),
+    "max_data_age_days": (0, 365),
+    "max_decision_age_minutes": (1, 10080),
+    "read_evidence_max_age_seconds": (30, 86400),
+}
+NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
+    "max_bid_change_pct": (0.01, 100.0),
+    "max_budget_change_pct": (0.01, 100.0),
+    "max_placement_change_points": (0.01, 900.0),
+    "target_acos": (0.01, 1000.0),
+    "max_acos": (0.01, 1000.0),
+    "min_spend": (0.0, 1000000000.0),
+    "waste_spend": (0.0, 1000000000.0),
+    "harvest_max_acos": (0.01, 1000.0),
+    "bid_increase_pct": (0.0, 100.0),
+    "bid_decrease_pct": (0.0, 100.0),
+    "severe_bid_decrease_pct": (0.0, 100.0),
+    "budget_increase_pct": (0.0, 100.0),
+}
+
+STRATEGY_SETTING_KEYS = {
+    "target_acos", "max_acos", "min_clicks", "min_orders", "min_spend", "waste_clicks",
+    "waste_spend", "harvest_orders", "harvest_max_acos", "bid_increase_pct", "bid_decrease_pct",
+    "severe_bid_decrease_pct", "budget_increase_pct", "max_bid_change_pct", "max_budget_change_pct",
+    "attribution_lag_days", "min_window_days", "max_data_age_days", "allow_bid_changes",
+    "allow_budget_changes", "allow_negatives", "allow_harvest", "allow_placement_changes",
+    "allow_campaign_creation", "allow_official_recommendation_apply", "recommendation_types",
 }
 
 
@@ -143,8 +198,10 @@ class Store:
             ("reservation_token", "TEXT"),
             ("outcome_status", "TEXT"),
             ("structured_result", "INTEGER"),
+            ("result_json", "TEXT"),
         ):
             cls._ensure_column(conn, "actions", column, definition)
+        cls._ensure_column(conn, "verifications", "evidence_action_id", "INTEGER")
 
     def _init_schema(self) -> None:
         with self.connection() as conn:
@@ -289,6 +346,7 @@ class Store:
                     reason TEXT,
                     args_json TEXT NOT NULL,
                     result_summary TEXT,
+                    result_json TEXT,
                     duration_ms INTEGER,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(task_id) REFERENCES tasks(id),
@@ -302,6 +360,7 @@ class Store:
                     decision_id TEXT NOT NULL,
                     task_id TEXT NOT NULL,
                     verifier_session_id TEXT NOT NULL,
+                    evidence_action_id INTEGER,
                     status TEXT NOT NULL,
                     expected_json TEXT NOT NULL,
                     actual_json TEXT NOT NULL,
@@ -376,6 +435,46 @@ class Store:
         with self.connection() as conn:
             return {row["key"]: json.loads(row["value"]) for row in conn.execute("SELECT key,value FROM settings")}
 
+    @staticmethod
+    def validate_strategy_overrides(values: dict[str, Any], current: dict[str, Any] | None = None) -> dict[str, Any]:
+        if not isinstance(values, dict):
+            raise ValueError("strategy overrides must be an object")
+        unknown = set(values) - STRATEGY_SETTING_KEYS
+        if unknown:
+            raise ValueError(f"unknown strategy settings: {', '.join(sorted(unknown))}")
+        normalized = dict(values)
+        for key in BOOLEAN_SETTINGS & values.keys():
+            if not isinstance(values[key], bool):
+                raise ValueError(f"{key} must be a boolean")
+        for key, (minimum, maximum) in INTEGER_SETTING_RANGES.items():
+            if key not in values:
+                continue
+            value = values[key]
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{key} must be an integer")
+            if not minimum <= value <= maximum:
+                raise ValueError(f"{key} must be between {minimum} and {maximum}")
+        for key, (minimum, maximum) in NUMERIC_SETTING_RANGES.items():
+            if key not in values:
+                continue
+            value = values[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{key} must be numeric")
+            if not minimum <= float(value) <= maximum:
+                raise ValueError(f"{key} is outside its safe range")
+        if "recommendation_types" in values:
+            items = values["recommendation_types"]
+            if not isinstance(items, list) or not items or len(items) > 100 or any(
+                not isinstance(item, str) or not item.strip() or len(item) > 80 for item in items
+            ):
+                raise ValueError("recommendation_types must be a non-empty list of short strings")
+            normalized["recommendation_types"] = sorted({item.strip().upper() for item in items})
+        baseline = dict(current or DEFAULT_SETTINGS)
+        baseline.update(normalized)
+        if float(baseline["target_acos"]) > float(baseline["max_acos"]):
+            raise ValueError("target_acos cannot exceed max_acos")
+        return normalized
+
     def update_settings(self, updates: dict[str, Any]) -> dict[str, Any]:
         allowed = set(DEFAULT_SETTINGS)
         unknown = set(updates) - allowed
@@ -386,31 +485,59 @@ class Store:
         for key, required in SAFETY_LOCKED_SETTINGS.items():
             if key in updates and updates[key] != required:
                 raise ValueError(f"{key} is a locked safety invariant")
-        effective_mode = updates.get("mode", self.get_settings().get("mode"))
+        for key in BOOLEAN_SETTINGS & updates.keys():
+            if not isinstance(updates[key], bool):
+                raise ValueError(f"{key} must be a boolean")
+        for key, (minimum, maximum) in INTEGER_SETTING_RANGES.items():
+            if key not in updates:
+                continue
+            value = updates[key]
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{key} must be an integer")
+            if not minimum <= value <= maximum:
+                raise ValueError(f"{key} must be between {minimum} and {maximum}")
+        for key, (minimum, maximum) in NUMERIC_SETTING_RANGES.items():
+            if key not in updates:
+                continue
+            value = updates[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{key} must be numeric")
+            numeric = float(value)
+            if not minimum <= numeric <= maximum:
+                raise ValueError(f"{key} is outside its safe range")
+        if "recommendation_types" in updates:
+            values = updates["recommendation_types"]
+            if not isinstance(values, list) or not values or len(values) > 100 or any(
+                not isinstance(item, str) or not item.strip() or len(item) > 80 for item in values
+            ):
+                raise ValueError("recommendation_types must be a non-empty list of short strings")
+            updates = dict(updates)
+            updates["recommendation_types"] = sorted({item.strip().upper() for item in values})
+        current = self.get_settings()
+        effective_mode = updates.get("mode", current.get("mode"))
         if updates.get("execution_enabled") is True and effective_mode != "autopilot":
             raise ValueError("execution can only be enabled in autopilot mode")
         if effective_mode != "autopilot" and "mode" in updates:
             updates = dict(updates)
             updates["execution_enabled"] = False
-        for key in ("max_bid_change_pct", "max_budget_change_pct", "target_acos", "max_acos"):
-            if key in updates and not 0 < float(updates[key]) <= 1000:
-                raise ValueError(f"{key} is outside its safe range")
-        for key in ("max_actions_per_task", "max_actions_per_day", "max_campaign_creates_per_day",
-                    "decision_cooldown_hours", "max_data_jobs_per_day", "max_write_batch_size"):
-            if key in updates and not 1 <= int(updates[key]) <= 10000:
-                raise ValueError(f"{key} must be between 1 and 10000")
+        target_acos = float(updates.get("target_acos", current.get("target_acos", 30)))
+        max_acos = float(updates.get("max_acos", current.get("max_acos", 45)))
+        if target_acos > max_acos:
+            raise ValueError("target_acos cannot exceed max_acos")
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
+                timestamp = now_iso()
                 for key, value in updates.items():
                     conn.execute(
                         "INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) "
                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-                        (key, json.dumps(value), now_iso()),
+                        (key, json.dumps(value), timestamp),
                     )
                 conn.commit()
             except Exception:
-                conn.rollback(); raise
+                conn.rollback()
+                raise
         self.event("info", "settings.updated", "operator", None, "Control settings updated", updates)
         return self.get_settings()
 
@@ -420,6 +547,9 @@ class Store:
             raise ValueError("profile_id is required")
         now = now_iso()
         strategy = profile.get("strategy") if isinstance(profile.get("strategy"), dict) else {}
+        current_profile = self.get_profile(profile_id)
+        current_strategy = current_profile.get("strategy", {}) if current_profile else {}
+        strategy = self.validate_strategy_overrides(strategy, {**DEFAULT_SETTINGS, **current_strategy}) if strategy else {}
         with self.connection() as conn:
             conn.execute(
                 "INSERT INTO profiles(profile_id,name,marketplace,country_code,currency,enabled,strategy_json,last_seen_at,updated_at) "
@@ -458,8 +588,14 @@ class Store:
                 }
                 for tool in tools:
                     seen.add(tool.registered_name)
-                    old = conn.execute("SELECT schema_hash,semantic,family,risk FROM mcp_tools WHERE registered_name=?", (tool.registered_name,)).fetchone()
-                    drift = bool(old and old["schema_hash"] != tool.schema_hash)
+                    old = conn.execute("SELECT native_name,schema_hash,semantic,family,risk FROM mcp_tools WHERE registered_name=?", (tool.registered_name,)).fetchone()
+                    drift = bool(old and any((
+                        old["native_name"] != tool.native_name,
+                        old["schema_hash"] != tool.schema_hash,
+                        old["semantic"] != tool.semantic,
+                        old["family"] != tool.family,
+                        old["risk"] != tool.risk,
+                    )))
                     if drift:
                         drifted.append(tool.registered_name)
                     conn.execute(
@@ -505,7 +641,9 @@ class Store:
 
     def acknowledge_tool_drift(self, registered_name: str) -> None:
         with self.connection() as conn:
-            conn.execute("UPDATE mcp_tools SET drifted=0 WHERE registered_name=?", (registered_name,))
+            cursor = conn.execute("UPDATE mcp_tools SET drifted=0 WHERE registered_name=? AND enabled=1", (registered_name,))
+        if cursor.rowcount != 1:
+            raise KeyError("enabled MCP tool not found")
         self.event("warning", "mcp.catalog.drift_acknowledged", "operator", None, f"Acknowledged schema drift for {registered_name}", {})
 
     # Cycles and deterministic decisions -----------------------------------
@@ -637,29 +775,79 @@ class Store:
 
     def bind_worker(self, task_id: str, parent_session_id: str | None, worker_session_id: str,
                     worker_subagent_id: str | None, goal: str, role: str = "executor", model: str | None = None) -> dict[str, Any]:
-        if role not in {"executor", "verifier"}: raise ValueError("role must be executor or verifier")
+        if role not in {"executor", "verifier"}:
+            raise ValueError("role must be executor or verifier")
+        if not worker_session_id:
+            raise ValueError("worker_session_id is required")
         started = now_iso()
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            task = conn.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
-            if not task: conn.rollback(); raise KeyError("task not found")
-            allowed_status = {"planned", "queued", "executing", "verifying"}
-            if task["status"] not in allowed_status: conn.rollback(); raise ValueError(f"task cannot bind {role} from status {task['status']}")
-            if role == "executor":
-                conn.execute("UPDATE tasks SET status='executing',parent_session_id=COALESCE(parent_session_id,?),worker_session_id=?,worker_subagent_id=?,started_at=COALESCE(started_at,?) WHERE id=?",
-                             (parent_session_id, worker_session_id, worker_subagent_id, started, task_id))
-            else:
-                pending = conn.execute("SELECT COUNT(*) FROM decisions WHERE task_id=? AND status NOT IN ('executed','pending','failed','blocked','verified','mismatch')", (task_id,)).fetchone()[0]
-                if pending: conn.rollback(); raise ValueError("executor decisions are not ready for verification")
-                conn.execute("UPDATE tasks SET status='verifying',verifier_session_id=?,verifier_subagent_id=? WHERE id=?",
-                             (worker_session_id, worker_subagent_id, task_id))
-            conn.execute(
-                "INSERT INTO workers(session_id,subagent_id,parent_session_id,task_id,role,status,model,goal,last_seen_at,started_at) VALUES(?,?,?,?,?,'running',?,?,?,?) "
-                "ON CONFLICT(session_id) DO UPDATE SET subagent_id=excluded.subagent_id,parent_session_id=excluded.parent_session_id,task_id=excluded.task_id,role=excluded.role,status='running',model=excluded.model,goal=excluded.goal,last_seen_at=excluded.last_seen_at,stopped_at=NULL",
-                (worker_session_id, worker_subagent_id, parent_session_id, task_id, role, model, goal[:4000], started, started),
-            )
-            conn.commit()
-        self.event("info", "worker.bound", role, task_id, f"Hermes {role} bound to task", {"session_id": worker_session_id, "subagent_id": worker_subagent_id})
+            try:
+                task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+                if not task:
+                    raise KeyError("task not found")
+                allowed_status = {"planned", "queued", "executing", "verifying"}
+                if task["status"] not in allowed_status:
+                    raise ValueError(f"task cannot bind {role} from status {task['status']}")
+                if role == "executor":
+                    if task["verifier_session_id"]:
+                        raise ValueError("task already entered verification; executor cannot be rebound")
+                    if task["worker_session_id"] and task["worker_session_id"] != worker_session_id:
+                        active = conn.execute(
+                            "SELECT 1 FROM workers WHERE session_id=? AND status='running'",
+                            (task["worker_session_id"],),
+                        ).fetchone()
+                        if active:
+                            raise ValueError("task already has a different running executor")
+                    conn.execute(
+                        "UPDATE tasks SET status='executing',parent_session_id=COALESCE(parent_session_id,?),"
+                        "worker_session_id=?,worker_subagent_id=?,started_at=COALESCE(started_at,?) WHERE id=?",
+                        (parent_session_id, worker_session_id, worker_subagent_id, started, task_id),
+                    )
+                else:
+                    if task["worker_session_id"] == worker_session_id:
+                        raise ValueError("verifier must use a different Hermes session from executor")
+                    if task["verifier_session_id"] and task["verifier_session_id"] != worker_session_id:
+                        active = conn.execute(
+                            "SELECT 1 FROM workers WHERE session_id=? AND status='running'",
+                            (task["verifier_session_id"],),
+                        ).fetchone()
+                        if active:
+                            raise ValueError("task already has a different running verifier")
+                    pending = conn.execute(
+                        "SELECT COUNT(*) FROM decisions WHERE task_id=? AND status NOT IN "
+                        "('executed','pending','uncertain','failed','blocked','verified','mismatch')",
+                        (task_id,),
+                    ).fetchone()[0]
+                    if pending:
+                        raise ValueError("executor decisions are not ready for verification")
+                    conn.execute(
+                        "UPDATE tasks SET status='verifying',verifier_session_id=?,verifier_subagent_id=? WHERE id=?",
+                        (worker_session_id, worker_subagent_id, task_id),
+                    )
+                existing = conn.execute(
+                    "SELECT task_id,role,status FROM workers WHERE session_id=?", (worker_session_id,)
+                ).fetchone()
+                if existing and existing["status"] == "running" and (
+                    existing["task_id"] != task_id or existing["role"] != role
+                ):
+                    raise ValueError("Hermes session is already bound to another running role or task")
+                conn.execute(
+                    "INSERT INTO workers(session_id,subagent_id,parent_session_id,task_id,role,status,model,goal,last_seen_at,started_at) "
+                    "VALUES(?,?,?,?,?,'running',?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET "
+                    "subagent_id=excluded.subagent_id,parent_session_id=excluded.parent_session_id,task_id=excluded.task_id,"
+                    "role=excluded.role,status='running',model=excluded.model,goal=excluded.goal,last_seen_at=excluded.last_seen_at,"
+                    "stopped_at=NULL",
+                    (worker_session_id, worker_subagent_id, parent_session_id, task_id, role, model, goal[:4000], started, started),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        self.event(
+            "info", "worker.bound", role, task_id, f"Hermes {role} bound to task",
+            {"session_id": worker_session_id, "subagent_id": worker_subagent_id},
+        )
         return self.get_task(task_id) or {}
 
     def worker_for_session(self, session_id: str | None) -> dict[str, Any] | None:
@@ -679,19 +867,59 @@ class Store:
         self.event("info" if status == "completed" else "error", "worker.stopped", worker["role"] if worker else "worker",
                    worker["task_id"] if worker else None, f"Worker {status}", {"session_id": session_id, "duration_ms": duration_ms, "summary": summary or ""})
 
+    def reconcile_expired_reservations(self) -> list[str]:
+        """Quarantine expired write reservations instead of retrying them blindly.
+
+        A process may die after Amazon accepted a write but before the post-tool hook
+        records the result. Replaying such a decision could double-apply a budget or
+        bid change, so expired reservations require independent read reconciliation.
+        """
+        now = now_iso()
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = conn.execute(
+                    "SELECT id,profile_id,task_id FROM decisions "
+                    "WHERE status='reserved' AND reservation_expires_at IS NOT NULL AND reservation_expires_at<?",
+                    (now,),
+                ).fetchall()
+                ids = [str(row["id"]) for row in rows]
+                if ids:
+                    placeholders = ",".join("?" for _ in ids)
+                    conn.execute(
+                        f"UPDATE decisions SET status='uncertain',execution_outcome='reservation_expired',"
+                        f"failure='reservation expired before a confirmed tool result' WHERE id IN ({placeholders})",
+                        ids,
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        for row in rows:
+            self.alert_once(
+                "critical", "WRITE_RESERVATION_EXPIRED", row["profile_id"], row["task_id"], row["id"],
+                "A write reservation expired without a confirmed result; independent read reconciliation is required",
+                {"decision_id": row["id"]}, window_seconds=86400,
+            )
+        if rows:
+            self.event(
+                "critical", "decision.reservation_expired", "controller", None,
+                f"Quarantined {len(rows)} expired write reservation(s)", {"decision_ids": ids},
+            )
+        return ids
+
     def reserve_decision(
         self, decision_id: str, task_id: str, session_id: str, ttl_seconds: int,
         cooldown_seconds: int = 86400, *, max_actions_per_task: int = 50,
         max_actions_per_day: int = 250, max_campaign_creates_per_day: int = 2,
     ) -> dict[str, Any]:
+        self.reconcile_expired_reservations()
         now = now_iso(); token = secrets.token_urlsafe(24); expires = future_iso(ttl_seconds)
         cooldown_cutoff = (datetime.now(UTC) - timedelta(seconds=max(0, cooldown_seconds))).isoformat(timespec="seconds")
         day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat(timespec="seconds")
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                conn.execute("UPDATE decisions SET status='planned',reserved_by=NULL,reservation_token=NULL,reservation_expires_at=NULL,reserved_at=NULL "
-                             "WHERE status='reserved' AND reservation_expires_at<?", (now,))
                 row = conn.execute("SELECT * FROM decisions WHERE id=? AND task_id=?", (decision_id, task_id)).fetchone()
                 if not row: raise KeyError("decision not found for task")
                 if row["status"] != "planned": raise ValueError(f"decision is not reservable from status {row['status']}")
@@ -713,7 +941,7 @@ class Store:
                         raise ValueError("daily campaign creation limit reached")
                 duplicate = conn.execute(
                     "SELECT id,status FROM decisions WHERE id<>? AND plan_key=? AND created_at>=? "
-                    "AND status IN ('reserved','executed','pending','verified','failed','mismatch') ORDER BY created_at DESC LIMIT 1",
+                    "AND status IN ('reserved','executed','pending','uncertain','verified','failed','mismatch') ORDER BY created_at DESC LIMIT 1",
                     (decision_id, row["plan_key"], cooldown_cutoff),
                 ).fetchone()
                 if duplicate:
@@ -728,7 +956,7 @@ class Store:
 
     def mark_execution(self, *, decision_id: str, reservation_token: str, tool_name: str, outcome: str,
                        result: Any, failure: str | None = None) -> dict[str, Any]:
-        status_map = {"success": "executed", "pending": "pending", "partial": "failed", "failure": "failed", "unknown": "failed"}
+        status_map = {"success": "executed", "pending": "pending", "partial": "uncertain", "failure": "failed", "unknown": "uncertain"}
         status = status_map.get(outcome, "failed")
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -736,7 +964,8 @@ class Store:
                 row = conn.execute("SELECT status,reservation_token FROM decisions WHERE id=?", (decision_id,)).fetchone()
                 if not row: raise KeyError("decision not found")
                 if row["reservation_token"] != reservation_token: raise ValueError("reservation token mismatch")
-                if row["status"] != "reserved": raise ValueError(f"decision cannot record execution from status {row['status']}")
+                if row["status"] not in {"reserved", "uncertain"}:
+                    raise ValueError(f"decision cannot record execution from status {row['status']}")
                 conn.execute("UPDATE decisions SET status=?,execution_tool=?,execution_outcome=?,result_json=?,failure=?,executed_at=? WHERE id=?",
                              (status, tool_name, outcome, json.dumps(redact(result), ensure_ascii=False, default=str), redact_text(failure or "") or None, now_iso(), decision_id))
                 conn.commit()
@@ -745,22 +974,28 @@ class Store:
         return self.get_decision(decision_id) or {}
 
     def record_verification(self, *, decision_id: str, task_id: str, verifier_session_id: str,
-                            expected: dict[str, Any], actual: dict[str, Any], differences: dict[str, Any],
-                            status: str, message: str = "") -> dict[str, Any]:
+                            evidence_action_id: int, expected: dict[str, Any], actual: dict[str, Any],
+                            differences: dict[str, Any], status: str, message: str = "") -> dict[str, Any]:
         if status not in {"verified", "mismatch", "not_found", "error"}: raise ValueError("invalid verification status")
         final_decision_status = "verified" if status == "verified" else "mismatch"
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 worker = conn.execute("SELECT role,task_id FROM workers WHERE session_id=? AND status='running'", (verifier_session_id,)).fetchone()
-                if not worker or worker["role"] != "verifier" or worker["task_id"] != task_id:
-                    raise ValueError("verification requires the task's bound verifier")
+                task = conn.execute("SELECT verifier_session_id FROM tasks WHERE id=?", (task_id,)).fetchone()
+                if (not worker or worker["role"] != "verifier" or worker["task_id"] != task_id
+                        or not task or task["verifier_session_id"] != verifier_session_id):
+                    raise ValueError("verification requires the task's current bound verifier")
                 decision = conn.execute("SELECT status FROM decisions WHERE id=? AND task_id=?", (decision_id, task_id)).fetchone()
-                if not decision or decision["status"] not in {"executed", "pending", "failed", "mismatch"}:
+                if not decision or decision["status"] not in {"executed", "pending", "uncertain", "mismatch"}:
                     raise ValueError("decision is not ready for verification")
-                conn.execute("INSERT INTO verifications(decision_id,task_id,verifier_session_id,status,expected_json,actual_json,differences_json,message,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                             (decision_id, task_id, verifier_session_id, status, json.dumps(redact(expected), ensure_ascii=False),
-                              json.dumps(redact(actual), ensure_ascii=False), json.dumps(redact(differences), ensure_ascii=False), redact_text(message), now_iso()))
+                conn.execute(
+                    "INSERT INTO verifications(decision_id,task_id,verifier_session_id,evidence_action_id,status,expected_json,actual_json,differences_json,message,created_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (decision_id, task_id, verifier_session_id, evidence_action_id, status,
+                     json.dumps(redact(expected), ensure_ascii=False), json.dumps(redact(actual), ensure_ascii=False),
+                     json.dumps(redact(differences), ensure_ascii=False), redact_text(message), now_iso()),
+                )
                 conn.execute("UPDATE decisions SET status=?,verified_at=? WHERE id=?", (final_decision_status, now_iso(), decision_id))
                 conn.commit()
             except Exception:
@@ -781,7 +1016,7 @@ class Store:
                 counts = {row["status"]: row["count"] for row in rows}
                 total = sum(counts.values())
                 if not total: raise ValueError("task has no decisions")
-                pending = sum(counts.get(status, 0) for status in ("planned", "reserved", "executed", "pending"))
+                pending = sum(counts.get(status, 0) for status in ("planned", "reserved", "executed", "pending", "uncertain"))
                 if pending: raise ValueError("task still has unverified or pending decisions")
                 failed = counts.get("failed", 0) + counts.get("mismatch", 0)
                 status = "completed" if failed == 0 and counts.get("verified", 0) == total else "completed_with_issues"
@@ -802,28 +1037,57 @@ class Store:
                       operation: str, allowed: bool, plan_key: str | None = None, reservation_token: str | None = None,
                       args: dict[str, Any], success: bool | None = None, outcome_status: str | None = None,
                       structured_result: bool | None = None, reason: str | None = None,
-                      result_summary: str | None = None, duration_ms: int | None = None) -> int:
+                      result_summary: str | None = None, result: Any = None,
+                      duration_ms: int | None = None) -> int:
+        serialized_result = None
+        if result is not None:
+            serialized_result = json.dumps(redact(result), ensure_ascii=False, default=str)
         with self.connection() as conn:
             cursor = conn.execute(
-                "INSERT INTO actions(decision_id,task_id,session_id,tool_call_id,plan_key,reservation_token,actor_role,phase,tool_name,operation,allowed,success,outcome_status,structured_result,reason,args_json,result_summary,duration_ms,created_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (decision_id, task_id, session_id, tool_call_id, plan_key, reservation_token, actor_role, phase, tool_name[:240], operation,
-                 int(allowed), None if success is None else int(success), outcome_status, None if structured_result is None else int(structured_result),
-                 reason, json.dumps(redact(args), ensure_ascii=False), redact_text(result_summary or "")[:4000] or None, duration_ms, now_iso()),
+                "INSERT INTO actions(decision_id,task_id,session_id,tool_call_id,plan_key,reservation_token,actor_role,phase,"
+                "tool_name,operation,allowed,success,outcome_status,structured_result,reason,args_json,result_summary,result_json,"
+                "duration_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (decision_id, task_id, session_id, tool_call_id, plan_key, reservation_token, actor_role, phase,
+                 tool_name[:240], operation, int(allowed), None if success is None else int(success), outcome_status,
+                 None if structured_result is None else int(structured_result), redact_text(reason or "")[:2000] or None,
+                 json.dumps(redact(args), ensure_ascii=False), redact_text(result_summary or "")[:4000] or None,
+                 serialized_result, duration_ms, now_iso()),
             )
             return int(cursor.lastrowid)
 
+    @staticmethod
+    def _action_dict(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item["allowed"] = bool(item["allowed"])
+        item["success"] = None if item["success"] is None else bool(item["success"])
+        item["structured_result"] = None if item["structured_result"] is None else bool(item["structured_result"])
+        item["args"] = json.loads(item.pop("args_json"))
+        raw_result = item.pop("result_json", None)
+        item["result"] = json.loads(raw_result) if raw_result else None
+        return item
+
+    def get_action(self, action_id: int) -> dict[str, Any] | None:
+        with self.connection() as conn:
+            row = conn.execute("SELECT * FROM actions WHERE id=?", (action_id,)).fetchone()
+        return self._action_dict(row) if row else None
+
     def list_actions(self, limit: int = 200, task_id: str | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM actions"; params: list[Any] = []
-        if task_id: sql += " WHERE task_id=?"; params.append(task_id)
+        if task_id:
+            sql += " WHERE task_id=?"; params.append(task_id)
         sql += " ORDER BY id DESC LIMIT ?"; params.append(min(1000, max(1, limit)))
-        with self.connection() as conn: rows = conn.execute(sql, params).fetchall()
-        out = []
-        for row in rows:
-            item = dict(row); item["allowed"] = bool(item["allowed"]); item["success"] = None if item["success"] is None else bool(item["success"])
-            item["structured_result"] = None if item["structured_result"] is None else bool(item["structured_result"])
-            item["args"] = json.loads(item.pop("args_json")); out.append(item)
-        return out
+        with self.connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._action_dict(row) for row in rows]
+
+    def list_read_evidence(self, session_id: str, task_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM actions WHERE session_id=? AND task_id=? AND phase='after' AND operation='read' "
+                "AND allowed=1 AND structured_result=1 AND result_json IS NOT NULL ORDER BY id DESC LIMIT ?",
+                (session_id, task_id, min(100, max(1, limit))),
+            ).fetchall()
+        return [self._action_dict(row) for row in rows]
 
     def list_verifications(self, limit: int = 200, task_id: str | None = None,
                            decision_id: str | None = None) -> list[dict[str, Any]]:
@@ -939,6 +1203,36 @@ class Store:
             "recent_cycles": self.list_cycles(10), "recent_tasks": self.list_tasks(20), "recent_actions": self.list_actions(40),
             "recent_verifications": self.list_verifications(40), "recent_events": self.list_events(30), "alerts": self.list_alerts(30), "workers": self.list_workers(20), "generated_at": now_iso(),
         }
+
+    def integrity_check(self, *, quick: bool = True) -> dict[str, Any]:
+        pragma = "quick_check" if quick else "integrity_check"
+        with self.connection() as conn:
+            rows = [str(row[0]) for row in conn.execute(f"PRAGMA {pragma}").fetchall()]
+            foreign_key_errors = [tuple(row) for row in conn.execute("PRAGMA foreign_key_check").fetchall()]
+        ok = rows == ["ok"] and not foreign_key_errors
+        return {"ok": ok, "pragma": pragma, "messages": rows, "foreign_key_errors": foreign_key_errors}
+
+    def backup_to(self, destination: Path | str) -> dict[str, Any]:
+        target = Path(destination)
+        if target.resolve() == self.path.resolve():
+            raise ValueError("backup destination must differ from the live database")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + ".tmp")
+        temporary.unlink(missing_ok=True)
+        with self.connection() as source:
+            backup = sqlite3.connect(temporary)
+            try:
+                source.backup(backup)
+                backup.commit()
+            finally:
+                backup.close()
+        check = Store(temporary).integrity_check(quick=False)
+        if not check["ok"]:
+            temporary.unlink(missing_ok=True)
+            raise RuntimeError(f"backup integrity check failed: {check}")
+        temporary.replace(target)
+        target.chmod(0o600)
+        return {"path": str(target), "size": target.stat().st_size, "integrity": check}
 
     def purge_old(self, retention_days: int) -> dict[str, int]:
         cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat(); deleted = {}

@@ -47,16 +47,32 @@ def _count_collection(value: Any) -> int:
     return 1
 
 
-def parse_tool_outcome(result: Any) -> Outcome:
+def parse_tool_outcome(result: Any, *, operation: str = "unknown") -> Outcome:
     payload, structured = _as_payload(result)
     if not structured:
         text = str(payload)
         return Outcome("unknown", text[:1000] or "unstructured empty response", structured=False, payload=payload)
 
     if isinstance(payload, list):
-        # Lists are normally successful reads, but a write list may contain item-level errors.
-        errors = sum(1 for item in payload if isinstance(item, dict) and item.get("error"))
-        successes = len(payload) - errors
+        errors = 0
+        explicit_successes = 0
+        unclassified = 0
+        for item in payload:
+            if not isinstance(item, dict):
+                unclassified += 1
+                continue
+            item_status = str(item.get("status") or item.get("state") or "").strip().lower()
+            if item.get("error") or item.get("success") is False or item_status in _FAILURE_STATES:
+                errors += 1
+            elif item.get("success") is True or item_status in _SUCCESS_STATES:
+                explicit_successes += 1
+            else:
+                unclassified += 1
+        if operation == "write" and unclassified:
+            if errors or explicit_successes:
+                return Outcome("partial", f"write list is not fully classified: {explicit_successes} explicit success, {errors} error, {unclassified} unknown", explicit_successes, errors, True, payload)
+            return Outcome("unknown", "write list has no explicit success/failure signal", 0, 0, True, payload)
+        successes = explicit_successes + unclassified
         status = "partial" if errors and successes else "failure" if errors else "success"
         return Outcome(status, f"list result: {successes} success, {errors} error", successes, errors, True, payload)
 
@@ -101,9 +117,13 @@ def parse_tool_outcome(result: Any) -> Outcome:
     if success_count:
         return Outcome("success", f"result contains {success_count} successful item(s)", success_count, 0, True, payload)
 
-    # Common non-bulk successful identifiers.
+    # Resource identifiers prove that a read/job produced a resource, but they do not
+    # prove that a state-changing write was accepted or applied. Writes require an
+    # explicit status/success signal and are independently verified afterwards.
     if any(key in payload for key in ("campaignId", "adGroupId", "adId", "targetId", "reportId", "exportId", "subscriptionId")):
-        return Outcome("success", "response contains a created/retrieved resource identifier", 1, 0, True, payload)
+        if operation in {"read", "job"}:
+            return Outcome("success", "response contains a retrieved/created resource identifier", 1, 0, True, payload)
+        return Outcome("unknown", "resource identifier alone does not confirm a write", 0, 0, True, payload)
 
     # A 200-like JSON object without explicit outcome is not enough to commit a write.
     return Outcome("unknown", "structured response has no explicit success/failure signal", 0, 0, True, payload)

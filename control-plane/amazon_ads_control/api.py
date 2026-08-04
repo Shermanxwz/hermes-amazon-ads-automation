@@ -30,8 +30,13 @@ def _json_bytes(data: Any) -> bytes:
     return json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
 
 
+class AdsThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "HermesAdsControl/2.0"
+    server_version = "HermesAdsControl/2.1"
     app: App
 
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -42,7 +47,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'")
 
     def _respond(self, status: int, data: Any, headers: dict[str, str] | None = None) -> None:
         body = _json_bytes(data)
@@ -74,12 +82,21 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _body(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0") or 0)
+        if self.headers.get("Transfer-Encoding"):
+            raise ValueError("transfer encoding is not supported")
+        raw_length = self.headers.get("Content-Length", "")
+        try:
+            length = int(raw_length)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid Content-Length") from exc
         if length <= 0 or length > MAX_BODY:
             raise ValueError("invalid body size")
+        raw = self.rfile.read(length)
+        if len(raw) != length:
+            raise ValueError("request body was truncated")
         try:
-            data = json.loads(self.rfile.read(length))
-        except json.JSONDecodeError as exc:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError("invalid JSON") from exc
         if not isinstance(data, dict):
             raise ValueError("JSON body must be an object")
@@ -130,8 +147,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/health/live":
                 self._respond(200, {"ok": True})
             elif path == "/health/ready":
+                self.app.store.reconcile_expired_reservations()
+                integrity = self.app.store.integrity_check()
                 dashboard = self.app.store.dashboard()
-                self._respond(200, {"ok": True, "database": "ready", "mode": dashboard["settings"].get("mode"), "catalog": dashboard["catalog"]})
+                self._respond(200 if integrity["ok"] else 503, {
+                    "ok": integrity["ok"], "database": integrity,
+                    "mode": dashboard["settings"].get("mode"), "catalog": dashboard["catalog"],
+                })
             elif path == "/api/session":
                 session = self._browser_session()
                 self._respond(200, {"authenticated": bool(session), "csrf": session.csrf if session else None})
@@ -220,6 +242,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/agent/worker-bind": lambda: self.app.service.bind_worker(data),
                 "/api/agent/tool-check": lambda: self.app.service.authorize_tool(data),
                 "/api/agent/tool-result": lambda: self.app.service.finish_tool(data),
+                "/api/agent/read-evidence": lambda: self.app.service.read_evidence(data),
                 "/api/agent/verify": lambda: self.app.service.verify_decision(data),
                 "/api/agent/task-finalize": lambda: self.app.service.finalize_task(data, str(data.get("actor") or "hermes-main")),
                 "/api/agent/stream-events": lambda: self.app.service.ingest_stream(data),
@@ -277,6 +300,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(404, {"error": "not_found"})
         except (ValueError, KeyError) as exc:
             self._respond(400, {"error": str(exc)})
+        except Exception as exc:
+            self.app.store.event("error", "api.put_error", "controller", None, str(exc), {"path": path})
+            self._respond(500, {"error": "internal_error"})
 
 
 def build_server(settings: Settings, store: Store | None = None) -> ThreadingHTTPServer:
@@ -285,4 +311,4 @@ def build_server(settings: Settings, store: Store | None = None) -> ThreadingHTT
               sessions=SessionStore(settings.session_ttl_seconds, settings.max_sessions),
               login_limiter=LoginRateLimiter())
     handler = type("ConfiguredHandler", (Handler,), {"app": app})
-    return ThreadingHTTPServer((settings.host, settings.port), handler)
+    return AdsThreadingHTTPServer((settings.host, settings.port), handler)

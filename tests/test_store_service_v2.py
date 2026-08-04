@@ -6,7 +6,7 @@ import unittest
 from amazon_ads_control.catalog import descriptor_from_payload
 from amazon_ads_control.db import Store
 from amazon_ads_control.service import ControlService
-from helpers import Environment, READ_CAMPAIGN, WRITE_TARGET, CRITICAL_ACCOUNT
+from helpers import Environment, READ_CAMPAIGN, READ_TARGET, WRITE_TARGET, CRITICAL_ACCOUNT
 
 
 class StoreServiceV2Tests(unittest.TestCase):
@@ -37,7 +37,12 @@ class StoreServiceV2Tests(unittest.TestCase):
         self.assertEqual(outcome["outcome"]["status"],"success")
         self.store.finish_worker("exec","completed","done")
         self.service.bind_worker({"task_id":task["id"],"worker_session_id":"verify","role":"verifier","goal":f"[ads-task:{task['id']}] [ads-role:verifier]"})
-        verified=self.service.verify_decision({"decision_id":decision["id"],"session_id":"verify","actual":{"targetId":"t1","bid":0.8}})
+        read_auth=self.service.authorize_tool({"tool_name":READ_TARGET["registered_name"],"args":{"targetId":"t1"},"session_id":"verify"})
+        self.assertTrue(read_auth["allowed"])
+        read=self.service.finish_tool({"tool_name":READ_TARGET["registered_name"],"args":{"targetId":"t1"},"result":{"targetId":"t1","bid":0.8},"session_id":"verify","task_id":task["id"]})
+        evidence=self.service.read_evidence({"decision_id":decision["id"],"session_id":"verify"})
+        self.assertEqual(evidence["evidence"][0]["action_id"],read["action_id"])
+        verified=self.service.verify_decision({"decision_id":decision["id"],"session_id":"verify","evidence_action_id":read["action_id"]})
         self.assertEqual(verified["status"],"verified")
         final=self.service.finalize_task({"task_id":task["id"],"summary":"verified"},"main")
         self.assertEqual(final["status"],"completed")
@@ -102,8 +107,16 @@ class StoreServiceV2Tests(unittest.TestCase):
         auth=self.service.authorize_tool({"tool_name":WRITE_TARGET["registered_name"],"args":{"targetId":"t1","bid":0.8},"session_id":"exec"})
         out=self.service.finish_tool({"tool_name":WRITE_TARGET["registered_name"],"result":{"message":"accepted maybe"},"session_id":"exec","decision_id":decision["id"],"reservation_token":auth["reservation_token"]})
         self.assertEqual(out["outcome"]["status"],"unknown")
-        self.assertEqual(self.store.get_decision(decision["id"])["status"],"failed")
+        self.assertEqual(self.store.get_decision(decision["id"])["status"],"uncertain")
         self.assertTrue(any(a["code"]=="WRITE_OUTCOME_UNCONFIRMED" for a in self.store.list_alerts()))
+
+    def test_identifier_only_write_result_is_quarantined(self):
+        _,task,decision=self.env.one_decision_task()
+        self.service.bind_worker({"task_id":task["id"],"worker_session_id":"exec","role":"executor","goal":"x"})
+        auth=self.service.authorize_tool({"tool_name":WRITE_TARGET["registered_name"],"args":{"targetId":"t1","bid":0.8},"session_id":"exec"})
+        out=self.service.finish_tool({"tool_name":WRITE_TARGET["registered_name"],"result":{"targetId":"t1"},"session_id":"exec","decision_id":decision["id"],"reservation_token":auth["reservation_token"]})
+        self.assertEqual(out["outcome"]["status"],"unknown")
+        self.assertEqual(self.store.get_decision(decision["id"])["status"],"uncertain")
 
     def test_verification_mismatch_creates_alert(self):
         _,task,decision=self.env.one_decision_task()
@@ -112,7 +125,8 @@ class StoreServiceV2Tests(unittest.TestCase):
         self.service.finish_tool({"tool_name":WRITE_TARGET["registered_name"],"result":{"success":[{}],"error":[]},"session_id":"exec","decision_id":decision["id"],"reservation_token":auth["reservation_token"]})
         self.store.finish_worker("exec","completed")
         self.service.bind_worker({"task_id":task["id"],"worker_session_id":"v","role":"verifier","goal":"x"})
-        result=self.service.verify_decision({"decision_id":decision["id"],"session_id":"v","actual":{"bid":0.7}})
+        read=self.service.finish_tool({"tool_name":READ_TARGET["registered_name"],"args":{"targetId":"t1"},"result":{"targetId":"t1","bid":0.7},"session_id":"v","task_id":task["id"]})
+        result=self.service.verify_decision({"decision_id":decision["id"],"session_id":"v","evidence_action_id":read["action_id"]})
         self.assertEqual(result["status"],"mismatch")
         self.assertTrue(any(a["code"]=="WRITE_VERIFICATION_MISMATCH" for a in self.store.list_alerts()))
 

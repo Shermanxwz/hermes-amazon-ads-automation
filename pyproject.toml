@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-amazon-ads-control"
-version = "2.0.0"
+version = "2.1.0"
 description = "Deterministic Hermes-native Amazon Ads autopilot with executor-only writes and independent verification"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -13,6 +13,7 @@ authors = [{name = "Shermanxwz"}]
 [project.scripts]
 amazon-ads-control = "amazon_ads_control.server:main"
 amazon-ads-worker = "amazon_ads_control.worker:main"
+amazon-ads-backtest = "amazon_ads_control.backtest_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "control-plane"}

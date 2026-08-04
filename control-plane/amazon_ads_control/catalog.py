@@ -110,6 +110,8 @@ def infer_risk(native_name: str, semantic: str, family: str) -> str:
         return "medium"
     if semantic == "unknown":
         return "critical"
+    if any(word in lowered for word in ("workflow", "bulk", "batch", "composite", "multi_step", "multistep")):
+        return "critical"
     if family in {"billing", "account_admin"} or any(word in lowered for word in _HIGH_RISK_WORDS):
         return "critical"
     if family in {"campaign", "ad_group", "ad", "portfolio", "stream", "amc"} and any(

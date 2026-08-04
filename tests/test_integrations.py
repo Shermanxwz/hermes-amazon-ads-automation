@@ -52,3 +52,49 @@ class IntegrationUtilityTests(unittest.TestCase):
         event={"Records":[{"body":json.dumps({"detail":{"profileId":"p","datasetId":"budget-usage","campaignId":"c"},"id":"e1","time":"t"})}]}
         rows=stream._unwrap(event); normalized=stream.normalize(rows[0])
         self.assertEqual(normalized["profile_id"],"p"); self.assertEqual(normalized["dataset_id"],"budget-usage"); self.assertTrue(normalized["dedupe_key"])
+
+from io import BytesIO
+from unittest.mock import patch
+from urllib.error import HTTPError, URLError
+
+
+class _Response:
+    def __init__(self, body): self.body=body
+    def __enter__(self): return self
+    def __exit__(self,*_): return False
+    def read(self): return self.body
+
+
+class MarketingRelayFailureTests(unittest.TestCase):
+    def setUp(self):
+        self.old_token, self.old_attempts = stream.TOKEN, stream.MAX_ATTEMPTS
+        stream.TOKEN = "x"*48; stream.MAX_ATTEMPTS = 3
+    def tearDown(self):
+        stream.TOKEN, stream.MAX_ATTEMPTS = self.old_token, self.old_attempts
+
+    def test_empty_and_missing_token(self):
+        self.assertEqual(stream.relay(None), {"inserted":0,"duplicates":0})
+        stream.TOKEN = "short"
+        with self.assertRaisesRegex(RuntimeError,"missing or too short"):
+            stream.relay({"id":"x"})
+
+    def test_transient_errors_retry_then_succeed(self):
+        calls=[URLError("down"), HTTPError("u",429,"rate",{},BytesIO(b"rate")), _Response(b'{"inserted":1,"duplicates":0}')]
+        with patch.object(stream,"urlopen",side_effect=calls) as request, patch.object(stream.time,"sleep"):
+            result=stream.relay({"id":"e","detail":{"datasetId":"x"}})
+        self.assertEqual(result["inserted"],1); self.assertEqual(request.call_count,3)
+
+    def test_permanent_http_error_does_not_retry(self):
+        error=HTTPError("u",400,"bad",{},BytesIO(b'{"error":"bad"}'))
+        with patch.object(stream,"urlopen",side_effect=error) as request:
+            with self.assertRaisesRegex(RuntimeError,"HTTP 400"):
+                stream.relay({"id":"e"})
+        self.assertEqual(request.call_count,1)
+
+    def test_invalid_response_and_retry_exhaustion(self):
+        with patch.object(stream,"urlopen",return_value=_Response(b"[]")):
+            with self.assertRaisesRegex(RuntimeError,"JSON object"):
+                stream.relay({"id":"e"})
+        with patch.object(stream,"urlopen",side_effect=URLError("down")), patch.object(stream.time,"sleep"):
+            with self.assertRaisesRegex(RuntimeError,"after 3 attempts"):
+                stream.relay({"id":"e"})

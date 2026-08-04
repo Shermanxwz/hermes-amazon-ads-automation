@@ -10,15 +10,32 @@ BASE_URL = os.getenv("ADS_CONTROL_URL", "http://127.0.0.1:8790").rstrip("/")
 TOKEN = os.getenv("ADS_CONTROL_AGENT_TOKEN", "")
 
 
+def _decode(raw):
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return {"error": "invalid_control_response", "detail": str(exc)}
+    return data if isinstance(data, dict) else {
+        "error": "invalid_control_response", "detail": "control response must be a JSON object",
+    }
+
+
 def request(method, path, payload=None, timeout=4):
     body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode()
-    req = Request(BASE_URL + path, data=body, method=method, headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
+    req = Request(
+        BASE_URL + path, data=body, method=method,
+        headers={
+            "Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json",
+            "User-Agent": "hermes-amazon-ads-plugin/2.1",
+        },
+    )
     try:
         with urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read().decode())
+            data = _decode(response.read())
+            data.setdefault("http_status", response.status)
+            return data
     except HTTPError as exc:
-        try: data = json.loads(exc.read().decode())
-        except Exception: data = {"error": str(exc)}
+        data = _decode(exc.read())
         data["http_status"] = exc.code
         return data
     except (URLError, TimeoutError, OSError) as exc:

@@ -109,8 +109,8 @@ def pre_tool_call(tool_name, args, task_id="", tool_call_id=None, **kwargs):
         return None
     session_id = _session(task_id=task_id, **kwargs)
     sync = sync_live_catalog()
-    if sync.get("error") and tool_name not in _CATALOG:
-        return {"action": "block", "message": "Amazon Ads MCP catalog is unavailable; operation failed closed"}
+    if sync.get("error"):
+        return {"action": "block", "message": "Amazon Ads MCP catalog refresh is unavailable; operation failed closed"}
     result = client.request("POST", "/api/agent/tool-check", {
         "tool_name": tool_name, "args": args or {}, "session_id": session_id,
         "tool_call_id": tool_call_id,
@@ -178,6 +178,7 @@ def register(ctx):
         ("ads_control_create_task", schemas.CREATE_TASK, tools.create_task),
         ("ads_control_status", schemas.STATUS, tools.status),
         ("ads_control_record_note", schemas.NOTE, tools.record_note),
+        ("ads_control_read_evidence", schemas.READ_EVIDENCE, tools.read_evidence),
         ("ads_control_verify_decision", schemas.VERIFY, tools.verify_decision),
         ("ads_control_finalize_task", schemas.FINALIZE, tools.finalize_task),
         ("ads_control_ingest_stream_events", schemas.STREAM, tools.ingest_stream_events),

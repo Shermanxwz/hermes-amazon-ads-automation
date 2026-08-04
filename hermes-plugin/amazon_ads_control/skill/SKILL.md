@@ -17,7 +17,7 @@ You are the **Hermes Main controller**. Amazon's official MCP is the capability 
 6. Call `ads_control_create_task(cycle_id=...)`.
 7. Delegate a dedicated executor. Its goal must contain both `[ads-task:TASK_ID]` and `[ads-role:executor]`.
 8. After the executor returns, delegate a **different** read-only verifier with `[ads-task:TASK_ID] [ads-role:verifier]`.
-9. The verifier independently reads each changed entity and calls `ads_control_verify_decision` with the fresh object state.
+9. The verifier independently reads each changed entity, calls `ads_control_read_evidence`, and passes the matching recorded `evidence_action_id` to `ads_control_verify_decision`.
 10. Main calls `ads_control_finalize_task` only after verification, then reports facts, changes, verification and unresolved alerts in Chinese.
 
 ## Normalized snapshot contract
@@ -95,7 +95,8 @@ The verifier is read-only.
 
 - Do not trust the executor summary or reuse its result as evidence.
 - Read each entity again through an exact cataloged read/query tool.
-- Call `ads_control_verify_decision(decision_id, actual)` with the fresh object response.
+- After the read, call `ads_control_read_evidence(decision_id)` and select the matching fresh read action.
+- Call `ads_control_verify_decision(decision_id, evidence_action_id)`; arbitrary model-written `actual` objects are rejected.
 - Verify IDs, state, bid/budget/placement/match type and any expected state in the decision.
 - A missing entity, pending async operation, partial bulk result or mismatch is an issue, not success.
 - Never call an Amazon Ads write tool. The control plane blocks verifier writes.

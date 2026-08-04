@@ -38,9 +38,15 @@ def record_note(message, task_id=None, level="info", **kwargs):
     }), ensure_ascii=False)
 
 
-def verify_decision(decision_id, actual, message="", **kwargs):
+def read_evidence(decision_id, limit=20, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/read-evidence", {
+        "decision_id": decision_id, "limit": limit, "session_id": _session(kwargs),
+    }), ensure_ascii=False)
+
+
+def verify_decision(decision_id, evidence_action_id, message="", **kwargs):
     return json.dumps(client.request("POST", "/api/agent/verify", {
-        "decision_id": decision_id, "actual": actual, "message": message,
+        "decision_id": decision_id, "evidence_action_id": evidence_action_id, "message": message,
         "session_id": _session(kwargs),
     }), ensure_ascii=False)
 

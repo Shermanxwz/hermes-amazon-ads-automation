@@ -35,7 +35,7 @@ def _contains_value(value: Any, wanted: Any) -> bool:
     for _key, item in _walk_values(value):
         if isinstance(item, (str, int, float)) and str(item).strip().lower() == needle:
             return True
-    return needle in json.dumps(value, ensure_ascii=False, default=str).lower()
+    return False
 
 
 def _key_norm(value: str) -> str:
@@ -112,6 +112,17 @@ def _first_numeric(items: list[tuple[str, Any]], names: tuple[str, ...]) -> floa
     return None
 
 
+def _family_matches(decision: dict[str, Any], tool_family: str) -> bool:
+    expected = str(decision.get("expected_family") or "")
+    if expected == tool_family:
+        return True
+    payload = decision.get("payload") if isinstance(decision.get("payload"), dict) else {}
+    field = str(payload.get("field") or "")
+    if expected == "campaign" and field == "budget" and tool_family in {"campaign", "budget"}:
+        return True
+    return False
+
+
 class ControlService:
     """Deterministic Amazon Ads control, execution and verification boundary."""
 
@@ -146,7 +157,7 @@ class ControlService:
         if existing and isinstance(existing.get("strategy"), dict):
             merged_policy.update(existing["strategy"])
         if isinstance(payload.get("policy"), dict):
-            merged_policy.update(payload["policy"])
+            merged_policy.update(self.store.validate_strategy_overrides(payload["policy"], merged_policy))
         plan = self.engine.plan(snapshot, StrategyPolicy.from_mapping(merged_policy))
         result = self.store.create_cycle(
             profile=plan.profile,
@@ -236,7 +247,7 @@ class ControlService:
         candidates = self.store.list_decisions(task_id=task_id, status="planned", limit=500)
         matches: list[dict[str, Any]] = []
         for decision in candidates:
-            if decision.get("expected_family") != tool.get("family"):
+            if not _family_matches(decision, str(tool.get("family") or "")):
                 continue
             entity_id = decision.get("entity_id")
             if entity_id and not _contains_value(args, entity_id):
@@ -273,24 +284,47 @@ class ControlService:
         risk = str(tool.get("risk") or "critical")
         if risk == "critical":
             return False, "critical-risk Amazon Ads tools are not autonomous"
+        if risk == "high" and settings.get("block_high_risk_writes", True):
+            return False, "high-risk Amazon Ads tools are blocked from autonomous execution"
         if settings.get("block_account_admin", True) and family in {"account_admin", "billing"}:
             return False, "account administration and billing are blocked"
         if settings.get("block_deletes", True) and any(word in lowered for word in ("delete", "archive", "remove")):
             return False, "delete/archive/remove operations are blocked"
+        profile = self.store.get_profile(str(decision.get("profile_id") or ""))
+        if not profile or not profile.get("enabled", False):
+            return False, "advertising profile is disabled or missing"
+        try:
+            created_at = datetime.fromisoformat(str(decision.get("created_at") or ""))
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=UTC)
+            age_minutes = (datetime.now(UTC) - created_at.astimezone(UTC)).total_seconds() / 60
+        except ValueError:
+            return False, "decision timestamp is invalid"
+        if age_minutes < -5:
+            return False, "decision timestamp is unexpectedly in the future"
+        if age_minutes > int(settings.get("max_decision_age_minutes", 180)):
+            return False, "deterministic decision is too old to execute safely"
         before, after = payload.get("before"), payload.get("after")
         if isinstance(before, (int, float)) and isinstance(after, (int, float)):
-            if float(before) <= 0:
-                return False, "planned before value must be positive"
-            change = abs(float(after) - float(before)) / float(before) * 100
-            limit = float(settings.get("max_budget_change_pct" if "budget" in lowered or payload.get("field") == "budget" else "max_bid_change_pct", 20))
-            if change > limit + 1e-9:
-                return False, f"planned change {change:.2f}% exceeds {limit:g}% guardrail"
+            if payload.get("field") in {"percentage", "adjustment_percent"}:
+                points = abs(float(after) - float(before))
+                limit = float(settings.get("max_placement_change_points", 25))
+                if points > limit + 1e-9:
+                    return False, f"planned placement change {points:.2f} points exceeds {limit:g} point guardrail"
+            else:
+                if float(before) <= 0:
+                    return False, "planned before value must be positive"
+                change = abs(float(after) - float(before)) / float(before) * 100
+                limit = float(settings.get("max_budget_change_pct" if "budget" in lowered or payload.get("field") == "budget" else "max_bid_change_pct", 20))
+                if change > limit + 1e-9:
+                    return False, f"planned change {change:.2f}% exceeds {limit:g}% guardrail"
         if decision.get("action_type") == "create_campaign" and not settings.get("allow_campaign_creation", False):
             return False, "campaign creation is disabled"
         return True, "within deterministic guardrails"
 
     # Tool boundary --------------------------------------------------------
     def authorize_tool(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.store.reconcile_expired_reservations()
         tool_name = str(payload.get("tool_name") or "")
         args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
         safe_args = redact(args)
@@ -346,7 +380,9 @@ class ControlService:
                     allowed, reason = False, "Amazon Ads writes require a bound executor"
                 else:
                     task = self.store.get_task(task_id)
-                    if not task or not task.get("write_allowed"):
+                    if not task or task.get("worker_session_id") != session_id:
+                        allowed, reason = False, "Amazon Ads writes require the task's current executor session"
+                    elif not task.get("write_allowed"):
                         allowed, reason = False, "task is not write-enabled"
                     else:
                         batch_violation = _write_batch_violation(args, int(settings.get("max_write_batch_size", 1)))
@@ -411,9 +447,9 @@ class ControlService:
         decision_id = str(payload.get("decision_id") or "") or None
         reservation_token = str(payload.get("reservation_token") or "") or None
         result = payload.get("result")
-        outcome = parse_tool_outcome(result)
         tool = self.store.get_tool(tool_name)
         operation = str(tool.get("semantic")) if tool else "unknown"
+        outcome = parse_tool_outcome(result, operation=operation)
         if operation == "write":
             if not decision_id or not reservation_token:
                 raise ValueError("write result requires decision_id and reservation_token")
@@ -444,6 +480,7 @@ class ControlService:
             structured_result=outcome.structured,
             reason=outcome.summary,
             result_summary=json.dumps(redact(outcome.payload), ensure_ascii=False, default=str)[:4000],
+            result=outcome.payload if outcome.structured else None,
             duration_ms=int(payload.get("duration_ms") or 0),
         )
         if operation == "write" and outcome.status not in {"success", "pending"}:
@@ -455,29 +492,92 @@ class ControlService:
         return {"recorded": True, "action_id": action_id, "outcome": outcome.__dict__}
 
     # Independent verification --------------------------------------------
+    def read_evidence(self, payload: dict[str, Any]) -> dict[str, Any]:
+        session_id = str(payload.get("session_id") or "").strip()
+        decision_id = str(payload.get("decision_id") or "").strip()
+        if not session_id or not decision_id:
+            raise ValueError("session_id and decision_id are required")
+        worker = self.store.worker_for_session(session_id)
+        if not worker or worker.get("role") != "verifier":
+            raise ValueError("only a bound verifier may list read evidence")
+        task = self.store.get_task(worker["task_id"])
+        if not task or task.get("verifier_session_id") != session_id:
+            raise ValueError("session is not the task's current verifier")
+        decision = self.store.get_decision(decision_id)
+        if not decision or decision.get("task_id") != worker.get("task_id"):
+            raise ValueError("decision does not belong to verifier task")
+        rows = []
+        for action in self.store.list_read_evidence(session_id, worker["task_id"], int(payload.get("limit") or 20)):
+            tool = self.store.get_tool(str(action.get("tool_name") or "")) or {}
+            result = action.get("result")
+            if not _family_matches(decision, str(tool.get("family") or "")):
+                continue
+            if decision.get("entity_id") and not _contains_value(result, decision["entity_id"]):
+                continue
+            rows.append({
+                "action_id": action["id"], "tool_name": action["tool_name"], "family": tool.get("family"),
+                "created_at": action["created_at"], "result_summary": action.get("result_summary"),
+            })
+        return {"decision_id": decision_id, "evidence": rows}
+
     def verify_decision(self, payload: dict[str, Any]) -> dict[str, Any]:
         decision_id = str(payload.get("decision_id") or "").strip()
         session_id = str(payload.get("session_id") or "").strip()
+        try:
+            evidence_action_id = int(payload.get("evidence_action_id"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("evidence_action_id is required") from exc
         if not decision_id or not session_id:
             raise ValueError("decision_id and session_id are required")
         worker = self.store.worker_for_session(session_id)
         if not worker or worker.get("role") != "verifier":
             raise ValueError("only a bound verifier may verify a decision")
+        task = self.store.get_task(worker["task_id"])
+        if not task or task.get("verifier_session_id") != session_id:
+            raise ValueError("session is not the task's current verifier")
         decision = self.store.get_decision(decision_id)
         if not decision or decision.get("task_id") != worker.get("task_id"):
             raise ValueError("decision does not belong to verifier task")
+        action = self.store.get_action(evidence_action_id)
+        if not action:
+            raise ValueError("read evidence action was not found")
+        if (action.get("session_id") != session_id or action.get("task_id") != worker.get("task_id")
+                or action.get("phase") != "after" or action.get("operation") != "read"
+                or not action.get("allowed") or action.get("structured_result") is not True
+                or not isinstance(action.get("result"), (dict, list))):
+            raise ValueError("evidence must be a structured cataloged read from the current verifier")
+        tool = self.store.get_tool(str(action.get("tool_name") or ""))
+        if not tool or not _family_matches(decision, str(tool.get("family") or "")):
+            raise ValueError("read evidence tool family does not match the decision")
+        try:
+            read_at = datetime.fromisoformat(str(action.get("created_at") or ""))
+            executed_at = datetime.fromisoformat(str(decision.get("executed_at") or decision.get("reserved_at") or ""))
+            if read_at.tzinfo is None:
+                read_at = read_at.replace(tzinfo=UTC)
+            if executed_at.tzinfo is None:
+                executed_at = executed_at.replace(tzinfo=UTC)
+        except ValueError as exc:
+            raise ValueError("verification timestamps are invalid") from exc
+        if read_at < executed_at:
+            raise ValueError("read evidence predates the write attempt")
+        max_age = int(self.store.get_settings().get("read_evidence_max_age_seconds", 600))
+        if (datetime.now(UTC) - read_at.astimezone(UTC)).total_seconds() > max_age:
+            raise ValueError("read evidence is too old")
+        actual = action["result"]
+        if decision.get("entity_id") and not _contains_value(actual, decision["entity_id"]):
+            raise ValueError("read evidence does not contain the planned entity")
         expected = decision.get("payload", {}).get("expected_state")
         if not isinstance(expected, dict) or not expected:
             expected = {
                 str(decision.get("payload", {}).get("field")): decision.get("payload", {}).get("after")
             } if decision.get("payload", {}).get("field") else {}
-        actual = payload.get("actual") if isinstance(payload.get("actual"), dict) else {}
         differences = _expected_differences(expected, actual)
         status = "verified" if expected and not differences else "mismatch" if actual else "not_found"
         return self.store.record_verification(
             decision_id=decision_id,
             task_id=worker["task_id"],
             verifier_session_id=session_id,
+            evidence_action_id=evidence_action_id,
             expected=expected,
             actual=actual,
             differences=differences,
@@ -493,6 +593,7 @@ class ControlService:
 
     # Context and ingestion ------------------------------------------------
     def context(self, session_id: str | None) -> dict[str, Any]:
+        self.store.reconcile_expired_reservations()
         worker = self.store.worker_for_session(session_id)
         settings = self.store.get_settings()
         task = self.store.get_task(worker["task_id"]) if worker else None
@@ -501,7 +602,7 @@ class ControlService:
         instructions = {
             "main": "Main: synchronize the exact MCP catalog, collect mature reports, plan a deterministic cycle, create a task, delegate an executor, then delegate a separate verifier. Never call Amazon Ads write tools.",
             "executor": "Executor: perform only planned decisions for the bound task. Each write is atomically reserved by pre_tool_call. Do not verify your own writes.",
-            "verifier": "Verifier: read Amazon state independently, call ads_control_verify_decision for each executed decision, and never call write tools.",
+            "verifier": "Verifier: read Amazon state independently, call ads_control_read_evidence, then verify with the recorded evidence_action_id. Never call write tools.",
         }[str(role)]
         return {
             "role": role,

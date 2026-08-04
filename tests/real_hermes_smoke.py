@@ -32,7 +32,7 @@ def main() -> int:
         assert loaded.error is None, loaded.error
         expected_tools = {
             "ads_control_sync_catalog", "ads_control_plan_cycle", "ads_control_create_task",
-            "ads_control_status", "ads_control_record_note", "ads_control_verify_decision",
+            "ads_control_status", "ads_control_record_note", "ads_control_read_evidence", "ads_control_verify_decision",
             "ads_control_finalize_task", "ads_control_ingest_stream_events",
         }
         assert expected_tools.issubset(set(loaded.tools_registered)), loaded.tools_registered

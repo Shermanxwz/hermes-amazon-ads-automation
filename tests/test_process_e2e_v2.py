@@ -12,7 +12,7 @@ from http.cookiejar import CookieJar
 from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor
 
 from amazon_ads_control.security import hash_password
-from helpers import READ_CAMPAIGN, WRITE_TARGET, one_target_snapshot
+from helpers import READ_CAMPAIGN, READ_TARGET, WRITE_TARGET, one_target_snapshot
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -36,7 +36,7 @@ class ProcessE2EV2Tests(unittest.TestCase):
                         if self.request(base,"/health/live")[0]==200: break
                     except Exception: time.sleep(.05)
                 else: self.fail("server did not start")
-                self.assertEqual(self.request(base,"/api/agent/catalog-sync","POST",{"tools":[READ_CAMPAIGN,WRITE_TARGET]})[0],200)
+                self.assertEqual(self.request(base,"/api/agent/catalog-sync","POST",{"tools":[READ_CAMPAIGN,READ_TARGET,WRITE_TARGET]})[0],200)
                 jar=CookieJar(); browser=build_opener(HTTPCookieProcessor(jar))
                 login=Request(base+"/api/login",data=json.dumps({"password":"correct horse battery staple"}).encode(),method="POST",headers={"Content-Type":"application/json"})
                 with browser.open(login) as response: csrf=json.loads(response.read().decode())["csrf"]
@@ -56,7 +56,10 @@ class ProcessE2EV2Tests(unittest.TestCase):
                 self.request(base,"/api/agent/worker-stop","POST",{"worker_session_id":"exec","status":"completed"})
                 # Independent verifier reads and commits expected state.
                 self.assertEqual(self.request(base,"/api/agent/worker-bind","POST",{"task_id":task["id"],"worker_session_id":"verify","role":"verifier","goal":"verifier"})[0],200)
-                status,verified=self.request(base,"/api/agent/verify","POST",{"decision_id":decision["id"],"session_id":"verify","actual":{"targetId":"t1","bid":.8}}); self.assertEqual(status,200); self.assertEqual(verified["status"],"verified")
+                self.assertEqual(self.request(base,"/api/agent/tool-check","POST",{"tool_name":READ_TARGET["registered_name"],"args":{"targetId":"t1"},"session_id":"verify","tool_call_id":"read-1"})[0],200)
+                status,read=self.request(base,"/api/agent/tool-result","POST",{"tool_name":READ_TARGET["registered_name"],"args":{"targetId":"t1"},"result":{"targetId":"t1","bid":.8},"session_id":"verify","task_id":task["id"]}); self.assertEqual(status,200)
+                status,evidence=self.request(base,"/api/agent/read-evidence","POST",{"decision_id":decision["id"],"session_id":"verify"}); self.assertEqual(status,200); self.assertEqual(evidence["evidence"][0]["action_id"],read["action_id"])
+                status,verified=self.request(base,"/api/agent/verify","POST",{"decision_id":decision["id"],"session_id":"verify","evidence_action_id":read["action_id"]}); self.assertEqual(status,200); self.assertEqual(verified["status"],"verified")
                 status,final=self.request(base,"/api/agent/task-finalize","POST",{"task_id":task["id"],"summary":"verified"}); self.assertEqual(status,200); self.assertEqual(final["status"],"completed")
             finally:
                 proc.terminate(); proc.wait(timeout=10)

@@ -19,8 +19,20 @@ class OutcomeTests(unittest.TestCase):
     def test_explicit_failure(self):
         self.assertEqual(parse_tool_outcome({"status": "failed", "error": "x"}).status, "failure")
 
-    def test_identifier_success(self):
-        self.assertEqual(parse_tool_outcome({"campaignId": "c"}).status, "success")
+    def test_identifier_success_for_read_or_job(self):
+        self.assertEqual(parse_tool_outcome({"campaignId": "c"}, operation="read").status, "success")
+        self.assertEqual(parse_tool_outcome({"reportId": "r"}, operation="job").status, "success")
+
+    def test_identifier_only_does_not_confirm_write(self):
+        out = parse_tool_outcome({"targetId": "t"}, operation="write")
+        self.assertEqual(out.status, "unknown")
+        self.assertFalse(out.terminal_success)
+
+    def test_unclassified_write_list_is_unknown(self):
+        self.assertEqual(parse_tool_outcome([{"targetId": "t"}], operation="write").status, "unknown")
+
+    def test_explicit_write_list_is_success(self):
+        self.assertEqual(parse_tool_outcome([{"status": "success", "targetId": "t"}], operation="write").status, "success")
 
     def test_unstructured_is_unknown(self):
         self.assertEqual(parse_tool_outcome("all good").status, "unknown")

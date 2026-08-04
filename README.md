@@ -1,4 +1,4 @@
-# Hermes Amazon Ads Autopilot v2
+# Hermes Amazon Ads Autopilot v2.1
 
 面向单个 Amazon Ads 运营环境的 **Hermes 原生、确定性、可观察、可独立验证** 的广告自动运营系统。
 
@@ -33,7 +33,7 @@ SQLite 审计 + 简明 Web + 异常与熔断
 - 命中的确定性规则、证据、原因和计划值；
 - Amazon MCP 的真实注册工具名、JSON Schema 与 Schema 哈希；
 - Executor 会话、原子预约令牌、工具参数、结构化结果；
-- 独立 Verifier 的重新查询结果、预期值、实际值和差异；
+- 独立 Verifier 的真实只读工具调用、证据 Action ID、预期值、实际值和差异；
 - 所有允许、阻断、失败、漂移、预算和资格异常。
 
 LLM 可以解释和编排，但不能凭自然语言直接产生广告写入。
@@ -96,15 +96,15 @@ LLM 可以解释和编排，但不能凭自然语言直接产生广告写入。
 以下规则无法从 Web 或普通设置关闭：
 
 - 必须使用实时 MCP Catalog；
-- Schema 漂移阻断写入；
+- 工具名、语义、族、风险或 Schema 任一漂移都会阻断写入；
 - 所有广告写入必须来自确定性计划；
 - Main 不能写，Verifier 不能写；
-- Executor 只能执行绑定任务；
+- Executor 只能执行当前绑定任务，Verifier 必须使用不同且当前有效的会话；
 - 每次只允许一个广告实体；
-- 决策必须原子预约，防止并发重复；
+- 决策必须原子预约；过期、部分成功或未知结果进入 `uncertain`，不能盲目重放；
 - 跨周期等价动作有冷却锁；
-- Delete/Archive 与账户管理始终禁止；
-- 任务完成前必须由不同 Verifier 独立读回。
+- Delete/Archive、账户/账单管理、高风险复合或批量工具始终禁止；
+- 任务完成前必须由不同 Verifier 进行写后新读取，并引用控制面记录的结构化证据。
 
 其他默认限制：单次竞价 20%、预算 25%、每任务 50 次、每日 250 次、每日新 Campaign 2 个。Campaign 创建与官方 Recommendation 自动应用默认关闭。
 
@@ -134,6 +134,7 @@ sudo -u amazonbot bash scripts/install.sh
 
 python3 scripts/control_cli.py generate-token
 python3 scripts/control_cli.py hash-password
+python3 scripts/control_cli.py doctor --full
 ```
 
 将结果写入 `/etc/hermes-amazon-ads-control.env`，参考 `deploy/control.env.example`：
@@ -166,23 +167,34 @@ hermes gateway restart
 7. 优先在 Amazon Ads Test Account 做写入/Verifier 验收；
 8. 再切换 `AUTOPILOT`。
 
-## 测试
+## 测试与回测
 
 ```bash
 bash scripts/validate.sh
+bash scripts/coverage.sh
+bash scripts/validate_deploy.sh
+PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" python3 tests/stress_recovery.py
 ```
 
-本地验证包括单元、HTTP、并发、迁移、独立进程 E2E、策略、Schema、结果解析、Hermes 插件契约、Web 安全、Marketing Stream、Secret Scan。GitHub CI 额外安装固定 Hermes 正式包，真实加载插件，并在线检查 Amazon 官方 Postman Collection 和 MCP 端点的认证保护。
+当前无凭据套件覆盖 120+ 项单元/集成测试、Python 3.11/3.12/3.13、分支覆盖率门槛、独立进程闭环、100 路原子预约竞争、1000 条流事件去重、200 路并发 HTTP、备份/完整性、Wheel 和全新安装、CLI、Nginx、systemd、前端语法、Secret Scan、Ruff 严重错误、Bandit 高严重性、真实 Playwright 浏览器、固定 Hermes 正式包及 Amazon 官方在线合同。精确数量以 CI 输出为准。
 
-无法在无凭据沙箱中伪造的唯一部分是：你的 Amazon OAuth、Profile 可见性和真实 Test Account/生产广告写入。项目不会把 Mock 测试描述成真实 Amazon 成功。
+历史或 Shadow 快照可通过安装后的 CLI 重放：
+
+```bash
+amazon-ads-backtest snapshots.jsonl --fail-on-label-mismatch --output report.json
+```
+
+回放只能证明确定性规则一致、数据门槛正确及人工标签符合，不能证明广告增量或因果收益。完整测试分层见 `docs/TESTING.md`。
+
+仍必须在所有者环境完成的验收包括：OAuth 与刷新、真实 Profile/权限、报告生命周期、真实 MCP Catalog、Amazon 实际限流、Marketing Stream AWS 投递、历史账户 Shadow 评估、Test Account/低风险 Canary 写入、不同 Verifier 的 Amazon 读回、真实 VPS 重启及备份恢复。逐项清单见 `docs/PRODUCTION_ACCEPTANCE.md`。项目不会把 Mock、合成回放或端点可达性描述成真实 Amazon 成功。
 
 ## 目录
 
 ```text
-control-plane/amazon_ads_control/   策略、事务、SQLite、HTTP 与 Web
+control-plane/amazon_ads_control/   策略、事务、回测、SQLite、HTTP 与 Web
 hermes-plugin/amazon_ads_control/   Hermes 插件和 Skill
 integrations/                       Marketing Stream 轻量接入
 scripts/                            安装、验证、官方契约检查
 config/ cron/ deploy/               Hermes、Cron、systemd、Nginx 示例
-tests/                              单元、集成、进程和真实 Hermes smoke
+tests/                              单元、集成、故障、压力、浏览器和真实 Hermes smoke
 ```

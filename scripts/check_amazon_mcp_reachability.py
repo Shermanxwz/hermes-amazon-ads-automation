@@ -16,7 +16,7 @@ BODY = json.dumps({
     "jsonrpc": "2.0",
     "id": "reachability-check",
     "method": "initialize",
-    "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "hermes-amazon-ads-ci", "version": "2.0.0"}},
+    "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "hermes-amazon-ads-ci", "version": "2.1.0"}},
 }).encode()
 
 

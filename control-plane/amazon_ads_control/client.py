@@ -7,6 +7,16 @@ from urllib.request import Request, urlopen
 from typing import Any
 
 
+def _decode(raw: bytes) -> dict[str, Any]:
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return {"error": "invalid_control_response", "detail": str(exc)}
+    if not isinstance(value, dict):
+        return {"error": "invalid_control_response", "detail": "control response must be a JSON object"}
+    return value
+
+
 class ControlClient:
     def __init__(self, base_url: str, token: str, timeout: float = 4.0):
         self.base_url = base_url.rstrip("/")
@@ -19,16 +29,19 @@ class ControlClient:
             self.base_url + path,
             data=body,
             method=method,
-            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+                "User-Agent": "hermes-amazon-ads-control/2.1",
+            },
         )
         try:
             with urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read().decode())
+                result = _decode(response.read())
+                result.setdefault("http_status", response.status)
+                return result
         except HTTPError as exc:
-            try:
-                detail = json.loads(exc.read().decode())
-            except Exception:
-                detail = {"error": str(exc)}
+            detail = _decode(exc.read())
             detail["http_status"] = exc.code
             return detail
         except (URLError, TimeoutError, OSError) as exc:

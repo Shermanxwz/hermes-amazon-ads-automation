@@ -2,6 +2,9 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let csrf="", dashboard=null, catalogTools=[];
 const modeHelp={autopilot:"自动运营：Main 自动分析并建计划；Executor 只执行计划内单实体操作；独立 Verifier 读回确认。",observe:"仅观察：继续读取、分析并生成决策，但所有广告写入都会被阻断。",paused:"暂停：阻断 Amazon Ads 读取、数据任务和写入，适合排查异常或维护。"};
 const roleLabel=v=>({main:"Main 主控",executor:"Executor 执行器",verifier:"Verifier 验证器"}[v]||v||"—");
+let noticeTimer=0;
+function showNotice(message,kind="error"){const n=$("#notice");if(!n)return;n.textContent=message;n.className=`notice ${kind}`;n.hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>n.hidden=true,6000)}
+async function mutate(button,work,success){const buttons=$$("button");buttons.forEach(x=>x.disabled=true);try{await work();if(success)showNotice(success,"success")}catch(err){showNotice(err.message||String(err));throw err}finally{buttons.forEach(x=>x.disabled=false)}}
 const esc=v=>String(v??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt=v=>v===null||v===undefined?"—":Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{maximumFractionDigits:2}):esc(v);
 const badge=(v,kind="")=>`<span class="badge ${kind}">${esc(v)}</span>`;
@@ -22,12 +25,12 @@ $("#profile-list").innerHTML=table(["Profile","市场","货币","策略"],d.prof
 $("#catalog").innerHTML=`<p>${d.catalog.tools} 个已发现工具，${d.catalog.drifted} 个待确认 Schema 漂移。</p><p class="muted">写入仅允许实时目录中、Schema 已确认且符合安全策略的工具；未知或漂移工具会 fail-closed。</p>`;
 $("#catalog-tools").innerHTML=table(["语义","族","风险","工具","Schema"],catalogTools.map(x=>`<tr><td>${badge(x.semantic,statusKind(x.semantic))}</td><td>${esc(x.family)}</td><td>${badge(x.risk,statusKind(x.risk))}</td><td class="mono">${esc(x.registered_name)}</td><td>${x.drifted?`<button class="ack-drift" data-tool="${esc(x.registered_name)}">确认新 Schema</button>`:badge(x.schema_hash?.slice(0,10),"good")}</td></tr>`));
 $("#target-acos").value=s.target_acos;$("#max-acos").value=s.max_acos;$("#max-bid-change").value=s.max_bid_change_pct;$("#max-budget-change").value=s.max_budget_change_pct;
-$$('.ack-drift').forEach(b=>b.onclick=async()=>{await api(`/api/catalog/${encodeURIComponent(b.dataset.tool)}/acknowledge`,{method:"PUT",body:"{}"});await refresh()})}
+$$('.ack-drift').forEach(b=>b.onclick=()=>mutate(b,async()=>{await api(`/api/catalog/${encodeURIComponent(b.dataset.tool)}/acknowledge`,{method:"PUT",body:"{}"});await refresh()},"Schema 已确认").catch(()=>{}))}
 async function refresh(){const [d,c]=await Promise.all([api("/api/dashboard"),api("/api/catalog?limit=2000")]);dashboard=d;catalogTools=c.tools||[];render()}
 async function boot(){const s=await api("/api/session");if(s.authenticated){csrf=s.csrf;$("#login").hidden=true;$("#app").hidden=false;await refresh()}}
 $("#login-form").addEventListener("submit",async e=>{e.preventDefault();try{const r=await api("/api/login",{method:"POST",body:JSON.stringify({password:$("#password").value})});csrf=r.csrf;$("#login").hidden=true;$("#app").hidden=false;await refresh()}catch(err){$("#login-error").textContent=err.message}});
-$("#refresh").onclick=()=>refresh().catch(console.error);$("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});location.reload()};
-$$('[data-mode]').forEach(b=>b.onclick=async()=>{const mode=b.dataset.mode;const execution_enabled=mode==="autopilot";await api("/api/settings",{method:"PUT",body:JSON.stringify({mode,execution_enabled})});await refresh()});
-$("#strategy-form").addEventListener("submit",async e=>{e.preventDefault();const body={target_acos:Number($("#target-acos").value),max_acos:Number($("#max-acos").value),max_bid_change_pct:Number($("#max-bid-change").value),max_budget_change_pct:Number($("#max-budget-change").value)};await api("/api/settings",{method:"PUT",body:JSON.stringify(body)});$("#strategy-message").textContent="已保存";await refresh()});
+$("#refresh").onclick=e=>mutate(e.currentTarget,refresh,"已刷新").catch(()=>{});$("#logout").onclick=async()=>{try{await api("/api/logout",{method:"POST",body:"{}"});location.reload()}catch(err){showNotice(err.message||String(err))}};
+$$('[data-mode]').forEach(b=>b.onclick=()=>mutate(b,async()=>{const mode=b.dataset.mode;const execution_enabled=mode==="autopilot";await api("/api/settings",{method:"PUT",body:JSON.stringify({mode,execution_enabled})});await refresh()},"运行模式已更新").catch(()=>{}));
+$("#strategy-form").addEventListener("submit",e=>{e.preventDefault();const button=e.currentTarget.querySelector("button");mutate(button,async()=>{const body={target_acos:Number($("#target-acos").value),max_acos:Number($("#max-acos").value),max_bid_change_pct:Number($("#max-bid-change").value),max_budget_change_pct:Number($("#max-budget-change").value)};await api("/api/settings",{method:"PUT",body:JSON.stringify(body)});$("#strategy-message").textContent="已保存";await refresh()},"策略已保存").catch(()=>{})});
 $$('#tabs button').forEach(b=>b.onclick=()=>{$$('#tabs button,.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active')});
-boot().catch(console.error);setInterval(()=>{if(!$("#app").hidden)refresh().catch(()=>{})},30000);
+boot().catch(err=>showNotice(err.message||String(err)));setInterval(()=>{if(!$("#app").hidden)refresh().catch(err=>showNotice(err.message||String(err)))},30000);

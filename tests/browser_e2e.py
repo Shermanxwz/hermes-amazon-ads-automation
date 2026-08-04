@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+from pathlib import Path
+import os
+import tempfile
+import threading
+
+from playwright.sync_api import sync_playwright
+
+from amazon_ads_control.api import build_server
+from amazon_ads_control.config import Settings
+from amazon_ads_control.security import hash_password
+
+PASSWORD = "correct horse battery staple"
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory() as td:
+        settings = Settings(
+            host="127.0.0.1", port=0, db_path=Path(td)/"state.db", public_origin="",
+            control_password_hash=hash_password(PASSWORD), agent_token="a"*48,
+            session_ttl_seconds=3600, max_sessions=8, retention_days=30, allow_remote_bind=False,
+        )
+        server = build_server(settings)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        console_errors: list[str] = []
+        page_errors: list[str] = []
+        try:
+            with sync_playwright() as p:
+                launch={"headless":True,"args":["--no-sandbox"]}
+                if os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE"):
+                    launch["executable_path"]=os.environ["PLAYWRIGHT_CHROMIUM_EXECUTABLE"]
+                browser = p.chromium.launch(**launch)
+                context = browser.new_context(viewport={"width": 1440, "height": 1000})
+                page = context.new_page()
+                page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+                page.on("pageerror", lambda error: page_errors.append(str(error)))
+                response = page.goto(base, wait_until="networkidle")
+                assert response and response.ok, f"dashboard load failed: {response.status if response else 'none'}"
+                assert response.headers.get("x-frame-options") == "DENY"
+                assert "object-src 'none'" in response.headers.get("content-security-policy", "")
+                page.get_by_placeholder("控制台密码").fill(PASSWORD)
+                page.get_by_role("button", name="登录").click()
+                page.wait_for_selector("#app:not([hidden])")
+                assert page.get_by_text("本页怎么理解").is_visible()
+                assert page.get_by_text("Main 主控").first.is_visible()
+                assert page.locator("#mode-help").inner_text().startswith("仅观察")
+
+                page.get_by_role("button", name="决策", exact=True).click()
+                assert page.locator("#decisions").get_attribute("class") == "tab active"
+                page.get_by_role("button", name="Profiles / MCP").click()
+                assert page.get_by_text("目标 ACOS", exact=False).first.is_visible()
+
+                page.get_by_role("button", name="自动运营").click()
+                page.wait_for_function("document.querySelector('#mode-pill').textContent.includes('AUTOPILOT')")
+                assert "Executor 可写" in page.locator("#execution-pill").inner_text()
+                assert "Executor 只执行" in page.locator("#mode-help").inner_text()
+
+                page.get_by_role("button", name="暂停", exact=True).click()
+                page.wait_for_function("document.querySelector('#mode-pill').textContent.includes('PAUSED')")
+                assert "阻断" in page.locator("#mode-help").inner_text()
+
+                page.set_viewport_size({"width": 390, "height": 844})
+                page.get_by_role("button", name="总览", exact=True).click()
+                assert page.locator("header").bounding_box()["width"] <= 390
+                assert page.locator(".controls").is_visible()
+                page.reload(wait_until="networkidle")
+                assert page.locator("#app").is_visible()
+                page.get_by_role("button", name="退出").click()
+                page.wait_for_selector("#login:not([hidden])")
+                browser.close()
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+        assert not console_errors, f"browser console errors: {console_errors}"
+        assert not page_errors, f"browser page errors: {page_errors}"
+    print("browser-e2e: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
