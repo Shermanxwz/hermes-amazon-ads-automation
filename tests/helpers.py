@@ -15,26 +15,31 @@ UTC = timezone.utc
 READ_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_query_campaign",
     "native_name": "campaign_management-query_campaign",
+    "source": "hermes-registry:na",
     "schema": {"name": "query campaign", "description": "Query campaigns", "parameters": {"type": "object"}},
 }
 READ_TARGET = {
     "registered_name": "mcp_amazon_ads_campaign_management_query_target",
     "native_name": "campaign_management-query_target",
+    "source": "hermes-registry:na",
     "schema": {"name": "query target", "description": "Query target", "parameters": {"type": "object", "properties": {"targetId": {"type": "string"}}}},
 }
 WRITE_TARGET = {
     "registered_name": "mcp_amazon_ads_campaign_management_update_target",
     "native_name": "campaign_management-update_target",
+    "source": "hermes-registry:na",
     "schema": {"name": "update target", "description": "Update target bid", "parameters": {"type": "object", "properties": {"targetId": {"type": "string"}, "bid": {"type": "number"}}}},
 }
 WRITE_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_update_campaign",
     "native_name": "campaign_management-update_campaign",
+    "source": "hermes-registry:na",
     "schema": {"name": "update campaign", "description": "Update campaign budget", "parameters": {"type": "object", "properties": {"campaignId": {"type": "string"}, "budget": {"type": "number"}}}},
 }
 REPORT_CREATE = {
     "registered_name": "mcp_amazon_ads_reporting_create_report",
     "native_name": "reporting-create_report",
+    "source": "hermes-registry:na",
     "schema": {
         "name": "create report", "description": "Create an asynchronous reporting job",
         "parameters": {"type": "object", "required": ["reportTypeId"], "properties": {"reportTypeId": {"type": "string"}}, "additionalProperties": False},
@@ -43,6 +48,7 @@ REPORT_CREATE = {
 CRITICAL_ACCOUNT = {
     "registered_name": "mcp_amazon_ads_account_management_update_advertiser_account",
     "native_name": "account_management-update_advertiser_account",
+    "source": "hermes-registry:na",
     "schema": {"description": "Update advertiser account settings"},
 }
 
