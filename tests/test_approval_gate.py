@@ -93,7 +93,7 @@ class ApprovalGateTests(unittest.TestCase):
         self.assertFalse(task["write_allowed"])
         self.assertEqual(approval["status"], "pending")
 
-        with self.assertRaisesRegex(ValueError, "approval"):
+        with self.assertRaisesRegex(ValueError, "awaiting_approval"):
             self.service.bind_worker({
                 "task_id": task["id"], "worker_session_id": "executor-before-approval",
                 "worker_subagent_id": "sub-1", "role": "executor",
