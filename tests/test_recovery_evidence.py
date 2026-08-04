@@ -120,6 +120,7 @@ class RecoveryEvidenceTests(unittest.TestCase):
         composite = {
             "registered_name": "mcp_amazon_ads_campaign_management_bulk_update_targets_workflow",
             "native_name": "campaign_management-bulk_update_targets_workflow",
+            "source": "hermes-registry:na",
             "schema": {"name": "bulk update targets workflow", "description": "Update target bid", "parameters": {"type": "object"}},
         }
         tool = descriptor_from_payload(composite)
@@ -133,6 +134,7 @@ class RecoveryEvidenceTests(unittest.TestCase):
         campaign_read = {
             "registered_name":"mcp_amazon_ads_campaign_management_query_campaign",
             "native_name":"campaign_management-query_campaign",
+            "source":"hermes-registry:na",
             "schema":{"description":"Query campaign","parameters":{"type":"object"}},
         }
         self.store.sync_catalog([descriptor_from_payload(READ_TARGET), descriptor_from_payload(WRITE_TARGET), descriptor_from_payload(campaign_read)])
@@ -169,6 +171,7 @@ class RecoveryEvidenceTests(unittest.TestCase):
         placement_tool={
             "registered_name":"mcp_amazon_ads_campaign_management_update_campaign_placement",
             "native_name":"campaign_management-update_campaign_placement",
+            "source":"hermes-registry:na",
             "schema":{"description":"Update campaign placement percentage","parameters":{"type":"object","properties":{"campaignId":{"type":"string"},"placement":{"type":"string"},"percentage":{"type":"number"}}}},
         }
         self.store.sync_catalog([descriptor_from_payload(placement_tool)])
