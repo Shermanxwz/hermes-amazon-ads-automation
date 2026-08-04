@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "hermes-plugin" / "amazon_ads_control" / "outbox.py"
@@ -52,7 +53,7 @@ class OutboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "outbox.jsonl"
             path.write_text("{not valid json\n", encoding="utf-8")
-            with unittest.mock.patch.dict(os.environ, {"ADS_CONTROL_OUTBOX_PATH": str(path)}, clear=False):
+            with patch.dict(os.environ, {"ADS_CONTROL_OUTBOX_PATH": str(path)}, clear=False):
                 event = module.enqueue({
                     "tool_name": "mcp_amazon_ads_update_target", "tool_call_id": "new",
                     "decision_id": "d", "reservation_token": "r", "result": {"ok": True},
@@ -79,7 +80,7 @@ class OutboxTests(unittest.TestCase):
             processes = [subprocess.Popen([sys.executable, "-c", script, str(MODULE), str(path), str(index)]) for index in range(8)]
             for process in processes:
                 self.assertEqual(process.wait(timeout=20), 0)
-            with unittest.mock.patch.dict(os.environ, {"ADS_CONTROL_OUTBOX_PATH": str(path)}, clear=False):
+            with patch.dict(os.environ, {"ADS_CONTROL_OUTBOX_PATH": str(path)}, clear=False):
                 self.assertEqual(module.pending_count(), 8)
                 rows = module._read(path)
                 self.assertEqual(len({row["event_id"] for row in rows}), 8)
