@@ -12,9 +12,29 @@ render=function(){
   const resources=runtime?.state?.resources||{};
   const resourcePill=$("#resource-pill");
   if(resourcePill){resourcePill.className=resources.defer_nonurgent_collection?"warn":"good";resourcePill.textContent=`资源 ${esc(resources.tier||"未知")} / ${fmt(resources.cpu_count)}C ${fmt(resources.memory_total_mb)}MB`}
+
+  const storage=d.storage||{}, files=storage.files||{}, filesystem=storage.filesystem||{};
+  const maintenance=storage.latest_maintenance||{}, pressure=maintenance.pressure||"normal";
+  const storagePill=$("#storage-pill");
+  if(storagePill){
+    storagePill.className=pressure==="hard"?"bad":pressure==="soft"?"warn":"good";
+    storagePill.textContent=`存储 ${fmt(files.total_mb)}MB / 空闲 ${fmt(filesystem.free_mb)}MB`;
+  }
+
   const reportsNode=$("#reports");
   if(reportsNode)reportsNode.innerHTML=table(["更新时间","Profile / 类型","窗口","状态","尝试","证据"],(reports.recent||[]).map(x=>`<tr><td>${esc(x.updated_at)}</td><td><span class="mono">${esc(x.profile_id)}</span><br>${esc(x.report_type)}</td><td>${esc(x.start_date)} → ${esc(x.end_date)}</td><td>${badge(x.status,statusKind(x.status))}</td><td>${fmt(x.attempt_count)}</td><td class="mono">${esc((x.normalized_hash||"").slice(0,12))}</td></tr>`));
+
+  const runtimeRows=(d.runtime_status||[]).map(x=>{
+    const r=x.state?.resources||{}, box=x.state?.result_outbox||{};
+    const pending=Number(box.pending??x.state?.result_outbox_pending??0);
+    const boxState=box.over_limit?badge("Outbox 已达上限","bad"):pending?badge("待补投","warn"):badge("正常","good");
+    return `<tr><td>${esc(x.component)}</td><td>${esc(x.updated_at)}</td><td>${esc(r.tier||"")} ${fmt(r.cpu_count)}C / ${fmt(r.memory_total_mb)}MB<br>Outbox ${fmt(pending)} / ${fmt(box.bytes)}B</td><td>${boxState}</td></tr>`;
+  });
+  runtimeRows.push(`<tr><td>control-storage</td><td>${esc(storage.generated_at||"")}</td><td>DB ${fmt(files.database_mb)}MB / WAL ${fmt(files.wal_mb)}MB<br>可回收 ${fmt(storage.sqlite?.reclaimable_mb)}MB</td><td>${pressure==="hard"?badge("硬阈值暂停","bad"):pressure==="soft"?badge("压力清理","warn"):badge("正常","good")}</td></tr>`);
   const runtimeNode=$("#runtime-status");
-  if(runtimeNode)runtimeNode.innerHTML=table(["组件","更新时间","资源 / 队列","状态"],(d.runtime_status||[]).map(x=>{const r=x.state?.resources||{};return `<tr><td>${esc(x.component)}</td><td>${esc(x.updated_at)}</td><td>${esc(r.tier||"")} ${fmt(r.cpu_count)}C / ${fmt(r.memory_total_mb)}MB<br>Outbox ${fmt(x.state?.result_outbox_pending)}</td><td>${x.state?.result_outbox_pending?badge("待补投","warn"):badge("正常","good")}</td></tr>`}));
+  if(runtimeNode)runtimeNode.innerHTML=table(["组件","更新时间","资源 / 队列","状态"],runtimeRows);
+
+  const rollupNode=$("#alert-rollups");
+  if(rollupNode)rollupNode.innerHTML=table(["月份","级别 / 代码","Profile","数量","时间范围 / 样例"],(d.alert_rollups||[]).map(x=>`<tr><td>${esc(x.bucket_start)}</td><td>${badge(x.severity,statusKind(x.severity))}<br><span class="mono">${esc(x.code)}</span></td><td class="mono">${esc(x.profile_id||"全局")}</td><td>${fmt(x.alert_count)}</td><td>${esc(x.first_at)} → ${esc(x.last_at)}<br>${esc(x.sample_message||"")}</td></tr>`));
 };
 if(dashboard)render();
