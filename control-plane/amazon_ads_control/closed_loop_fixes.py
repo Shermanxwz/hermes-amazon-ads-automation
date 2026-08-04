@@ -5,6 +5,8 @@ import secrets
 from typing import Any
 
 from . import db as db_module
+from . import service as service_module
+from .evidence import canonical_hash
 from .reporting import normalize_report_spec, report_key
 
 _INSTALLED = False
@@ -21,9 +23,17 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+
+    db_module.SAFETY_LOCKED_SETTINGS["require_result_event_id"] = True
+    db_module.DEFAULT_SETTINGS["require_result_event_id"] = True
+    db_module.BOOLEAN_SETTINGS.add("require_result_event_id")
+
     Store = db_module.Store
+    Service = service_module.ControlService
     original_validate = Store.validate_strategy_overrides
     original_update = Store.update_settings
+    original_get_cycle = Store.get_cycle
+    original_finish_tool = Service.finish_tool
 
     def create_report_job(self, spec: dict[str, Any], actor: str = "hermes-main") -> dict[str, Any]:
         normalized = normalize_report_spec(spec)
@@ -64,10 +74,37 @@ def install() -> None:
     def update_settings(self, updates: dict[str, Any]):
         if "auto_write_ad_products" in updates:
             updates = dict(updates)
-            updates.update(validate_strategy_overrides({"auto_write_ad_products": updates["auto_write_ad_products"]}, self.get_settings()))
+            updates.update(validate_strategy_overrides(
+                {"auto_write_ad_products": updates["auto_write_ad_products"]}, self.get_settings()
+            ))
         return original_update(self, updates)
+
+    def get_cycle(self, cycle_id: str):
+        item = original_get_cycle(self, cycle_id)
+        if not item:
+            return item
+        raw = item.pop("lineage_json", None)
+        item["lineage"] = json.loads(raw) if raw else {}
+        return item
+
+    def finish_tool(self, payload: dict[str, Any]):
+        tool = self.store.get_tool(str(payload.get("tool_name") or ""))
+        if tool and tool.get("semantic") == "write" and not payload.get("event_id"):
+            if self.store.get_settings().get("require_result_event_id", True):
+                raise ValueError("write result requires event_id, decision_id and reservation_token")
+            payload = dict(payload)
+            payload["event_id"] = canonical_hash({
+                "legacy_test": True,
+                "decision_id": payload.get("decision_id"),
+                "reservation_token": payload.get("reservation_token"),
+                "tool_name": payload.get("tool_name"),
+                "result": payload.get("result"),
+            })[:32]
+        return original_finish_tool(self, payload)
 
     Store.create_report_job = create_report_job
     Store.validate_strategy_overrides = validate_strategy_overrides
     Store.update_settings = update_settings
+    Store.get_cycle = get_cycle
+    Service.finish_tool = finish_tool
     _INSTALLED = True
