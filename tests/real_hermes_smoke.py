@@ -68,7 +68,7 @@ def main() -> int:
         assert skill.is_file()
         text = skill.read_text(encoding="utf-8")
         assert "Approval-Gated Full Autopilot" in text
-        assert "authenticated local control Web" in text
+        assert "authenticated Amazon Ads Control Web" in text
         print(
             f"real-hermes-smoke: OK ({len(expected_tools)} tools, "
             f"{len(loaded.hooks_registered)} hooks, {len(loaded.commands_registered)} commands, "
