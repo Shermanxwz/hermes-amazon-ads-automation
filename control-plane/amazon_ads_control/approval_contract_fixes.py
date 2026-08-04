@@ -23,23 +23,28 @@ def install() -> None:
     def decision_plan(decision: dict[str, Any]) -> dict[str, Any]:
         payload = decision.get("payload") if isinstance(decision.get("payload"), dict) else {}
         arguments = payload.get("approved_args") if isinstance(payload.get("approved_args"), dict) else {}
-        expected_state = payload.get("expected_state") if isinstance(payload.get("expected_state"), dict) else {}
+        expected_template = payload.get("approved_expected_state")
+        if not isinstance(expected_template, dict):
+            expected_template = payload.get("expected_state") if isinstance(payload.get("expected_state"), dict) else {}
         depends_on = payload.get("depends_on") if isinstance(payload.get("depends_on"), list) else []
         return {
             "decision_id": str(decision.get("id") or ""),
             "plan_key": str(decision.get("plan_key") or ""),
             "action_type": str(decision.get("action_type") or ""),
             "entity_type": str(decision.get("entity_type") or ""),
-            "entity_id": str(decision.get("entity_id") or ""),
+            # A successful create later exposes the real Amazon ID as entity_id,
+            # but approval remains bound to the original logical object and
+            # placeholder templates. Runtime binding must never rewrite consent.
+            "entity_id": str(decision.get("logical_entity_id") or decision.get("entity_id") or ""),
             "expected_family": str(decision.get("expected_family") or ""),
             "risk": str(decision.get("risk") or "critical"),
             "tool_name": str(payload.get("tool_name") or ""),
             # The operator must see and approve the canonical exact arguments,
             # not only their digest. The digest remains for independent runtime
-            # comparison, while the full arguments are part of the plan Hash.
+            # comparison, while the full templates are part of the plan Hash.
             "arguments": arguments,
             "arguments_hash": str(payload.get("approved_args_hash") or ""),
-            "expected_state": expected_state,
+            "expected_state": expected_template,
             "depends_on": [str(item) for item in depends_on],
             "maximum_daily_budget": payload.get("maximum_daily_budget"),
         }
