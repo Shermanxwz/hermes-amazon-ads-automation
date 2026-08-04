@@ -1,4 +1,4 @@
-# Complete sanitized Hermes example. Keep real values in $HERMES_HOME/.env or a secret manager.
+# Complete sanitized Hermes 0.18.2+ example. Keep real values in $HERMES_HOME/.env or a secret manager.
 plugins:
   enabled:
     - amazon-ads-control
@@ -39,19 +39,26 @@ providers:
         max_output_tokens: 65536
         supports_reasoning: true
 
+# AMAZON_ADS_MCP_URL must be the exact endpoint supplied by Amazon/onboarding.
+# Set ADS_MCP_DEFAULT_REGION=na|eu|fe in the Hermes process environment. The
+# public MCP announcement confirms global availability but does not publish
+# separate EU/FE MCP hostnames, so this example intentionally does not guess.
 mcp_servers:
   amazon-ads:
-    url: https://advertising-ai.amazon.com/mcp
+    url: ${AMAZON_ADS_MCP_URL}
     auth: oauth
     oauth:
-      client_id: ${AMAZON_ADS_CLIENT_ID}
-      scope: profile
-      redirect_port: 41515
-      redirect_uri: http://127.0.0.1:41515/callback/ciYSpNVlbv9P
-      client_secret: ${AMAZON_ADS_CLIENT_SECRET}
-      token_endpoint_auth_method: client_secret_basic
+      client_id: ${AMAZON_ADS_MCP_CLIENT_ID}
+      client_secret: ${AMAZON_ADS_MCP_CLIENT_SECRET}
+      scope: advertising::campaign_management
+      redirect_port: 0
+      client_name: Hermes Amazon Ads Autopilot
     connect_timeout: 60
     timeout: 180
+    supports_parallel_tool_calls: false
+    tools:
+      prompts: false
+      resources: false
     enabled: true
 
 fallback_providers:
@@ -64,16 +71,24 @@ compression:
   target_ratio: 0.2
   protect_last_n: 20
 
-# The plugin/control plane is the authorization boundary for Ads writes.
-# Cron must not wait for an interactive approval prompt.
+# Hermes' native approval mode stays non-interactive for cron. Routine writes are
+# controlled by the plugin. High-risk structural plans require the authenticated
+# control Web. Slash approval is disabled unless a separately isolated Gateway
+# explicitly opts in without terminal/file/environment-reading capabilities.
 approvals:
   cron_mode: allow
 
 delegation:
+  # Hermes 0.18.2 has one dependable global delegation model. The controller
+  # machine-enforces different Executor/Verifier sessions; different models are
+  # an optional deployment hardening only after the installed Hermes build is verified.
   model: MiniMax-M3
   provider: custom:new-api-230385
   reasoning_effort: max
-  max_concurrent_children: 2
+  # Safe default for the target 2C2G VPS: Executor and Verifier run sequentially.
+  max_concurrent_children: 1
   max_spawn_depth: 1
   orchestrator_enabled: false
+  inherit_mcp_toolsets: true
+  subagent_auto_approve: false
   max_iterations: 35

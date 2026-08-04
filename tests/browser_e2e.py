@@ -9,10 +9,38 @@ import threading
 from playwright.sync_api import sync_playwright
 
 from amazon_ads_control.api import build_server
+from amazon_ads_control.catalog import descriptor_from_payload
 from amazon_ads_control.config import Settings
+from amazon_ads_control.db import Store
 from amazon_ads_control.security import hash_password
+from amazon_ads_control.service import ControlService
 
 PASSWORD = "correct horse battery staple"
+CREATE_CAMPAIGN = {
+    "registered_name": "mcp_amazon_ads_campaign_management_create_campaign",
+    "native_name": "campaign_management-create_campaign",
+    "schema": {
+        "description": "Create one campaign",
+        "parameters": {
+            "type": "object",
+            "required": ["campaigns"],
+            "properties": {
+                "campaigns": {
+                    "type": "array", "minItems": 1, "maxItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "budget", "state"],
+                        "properties": {
+                            "name": {"type": "string"},
+                            "budget": {"type": "number"},
+                            "state": {"type": "string"},
+                        },
+                    },
+                }
+            },
+        },
+    },
+}
 
 
 def main() -> int:
@@ -20,8 +48,35 @@ def main() -> int:
         settings = Settings(
             host="127.0.0.1", port=0, db_path=Path(td)/"state.db", public_origin="",
             control_password_hash=hash_password(PASSWORD), agent_token="a"*48,
-            session_ttl_seconds=3600, max_sessions=8, retention_days=30, allow_remote_bind=False,
+            session_ttl_seconds=3600, max_sessions=8, retention_days=30,
+            allow_remote_bind=False,
         )
+        store = Store(settings.db_path)
+        service = ControlService(store)
+        store.sync_catalog([descriptor_from_payload(CREATE_CAMPAIGN)])
+        managed = service.create_managed_plan({
+            "title": "Browser exact Campaign approval",
+            "profile": {
+                "profile_id": "profile-browser", "marketplace": "US",
+                "country_code": "US", "currency": "USD",
+            },
+            "actions": [{
+                "plan_key": "browser-campaign",
+                "tool_name": CREATE_CAMPAIGN["registered_name"],
+                "action_type": "create_campaign",
+                "entity_type": "campaign",
+                "entity_id": "planned:browser-campaign",
+                "arguments": {"campaigns": [{
+                    "name": "Browser Approved Campaign", "budget": 19, "state": "PAUSED",
+                }]},
+                "expected_state": {
+                    "name": "Browser Approved Campaign", "budget": 19, "state": "PAUSED",
+                },
+                "maximum_daily_budget": 19,
+            }],
+        }, "browser-e2e-seed")
+        approval_hash = managed["approval"]["payload_hash"]
+
         server = build_server(settings)
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         base = f"http://127.0.0.1:{server.server_address[1]}"
@@ -47,6 +102,16 @@ def main() -> int:
                 assert page.get_by_text("本页怎么理解").is_visible()
                 assert page.get_by_text("Main 主控").first.is_visible()
                 assert page.locator("#mode-help").inner_text().startswith("仅观察")
+
+                page.get_by_role("button", name="审批", exact=True).click()
+                page.locator("#approvals.tab.active").wait_for()
+                assert page.get_by_text("Browser exact Campaign approval", exact=True).is_visible()
+                assert page.get_by_text("browser-campaign", exact=True).is_visible()
+                page.get_by_text("1. create_campaign", exact=False).click()
+                assert page.get_by_text("Browser Approved Campaign", exact=False).first.is_visible()
+                assert page.get_by_text('"budget": 19', exact=False).first.is_visible()
+                assert page.get_by_text(approval_hash, exact=True).is_visible()
+                assert page.get_by_role("button", name="批准", exact=True).is_visible()
 
                 page.get_by_role("button", name="决策", exact=True).click()
                 assert page.locator("#decisions").get_attribute("class") == "tab active"

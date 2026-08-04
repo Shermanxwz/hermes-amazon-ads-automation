@@ -45,7 +45,14 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "between"): _int("X_INT", 1, 1, 100)
 
     def test_environment_validation(self):
-        base = {"ADS_CONTROL_HOST": "127.0.0.1", "ADS_CONTROL_PORT": "8790", "ADS_CONTROL_PUBLIC_ORIGIN": "https://ads.example.com", "ADS_CONTROL_AGENT_TOKEN": "x" * 48, "ADS_CONTROL_PASSWORD_HASH": hash_password("correct horse battery staple")}
+        base = {
+            "ADS_CONTROL_HOST": "127.0.0.1",
+            "ADS_CONTROL_PORT": "8790",
+            "ADS_CONTROL_PUBLIC_ORIGIN": "https://ads.example.com",
+            "ADS_CONTROL_AGENT_TOKEN": "x" * 48,
+            "ADS_CONTROL_OPERATOR_TOKEN": "y" * 48,
+            "ADS_CONTROL_PASSWORD_HASH": hash_password("correct horse battery staple"),
+        }
         with patch.dict(os.environ, base, clear=True):
             settings = Settings.from_env(); settings.validate_runtime(); self.assertEqual(settings.public_origin, "https://ads.example.com")
             self.assertEqual(settings.maintenance_interval_seconds, 21600)
@@ -56,6 +63,10 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "origin"): Settings.from_env()
         with patch.dict(os.environ, {**base, "ADS_CONTROL_AGENT_TOKEN": " short "}, clear=True):
             with self.assertRaisesRegex(ValueError, "AGENT_TOKEN"): Settings.from_env().validate_runtime()
+        with patch.dict(os.environ, {**base, "ADS_CONTROL_OPERATOR_TOKEN": " short "}, clear=True):
+            with self.assertRaisesRegex(ValueError, "OPERATOR_TOKEN"): Settings.from_env().validate_runtime()
+        with patch.dict(os.environ, {**base, "ADS_CONTROL_OPERATOR_TOKEN": "x" * 48}, clear=True):
+            with self.assertRaisesRegex(ValueError, "must differ"): Settings.from_env().validate_runtime()
         with patch.dict(os.environ, {
             **base,
             "ADS_CONTROL_STORAGE_SOFT_LIMIT_MB": "512",
@@ -65,11 +76,18 @@ class ConfigTests(unittest.TestCase):
                 Settings.from_env().validate_runtime()
 
     def test_server_help_version_and_check(self):
-        self.assertEqual(__version__, "3.1.0")
+        self.assertEqual(__version__, "3.2.0")
         with self.assertRaises(SystemExit) as ctx, redirect_stdout(io.StringIO()): server_module.main(["--help"])
         self.assertEqual(ctx.exception.code, 0)
         with tempfile.TemporaryDirectory() as td:
-            env = {"ADS_CONTROL_HOST": "127.0.0.1", "ADS_CONTROL_PORT": "8790", "ADS_CONTROL_DB": str(Path(td) / "state.db"), "ADS_CONTROL_AGENT_TOKEN": "x" * 48, "ADS_CONTROL_PASSWORD_HASH": hash_password("correct horse battery staple")}
+            env = {
+                "ADS_CONTROL_HOST": "127.0.0.1",
+                "ADS_CONTROL_PORT": "8790",
+                "ADS_CONTROL_DB": str(Path(td) / "state.db"),
+                "ADS_CONTROL_AGENT_TOKEN": "x" * 48,
+                "ADS_CONTROL_OPERATOR_TOKEN": "y" * 48,
+                "ADS_CONTROL_PASSWORD_HASH": hash_password("correct horse battery staple"),
+            }
             output = io.StringIO()
             with patch.dict(os.environ, env, clear=True), redirect_stdout(output): self.assertEqual(server_module.main(["--check"]), 0)
             result = json.loads(output.getvalue())

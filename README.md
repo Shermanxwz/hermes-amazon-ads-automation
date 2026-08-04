@@ -1,128 +1,180 @@
-# Hermes Amazon Ads Autopilot v2.1
+# Hermes Amazon Ads Full Autopilot v3.2
 
-面向单个 Amazon Ads 运营环境的 **Hermes 原生、确定性、可观察、可独立验证** 的广告自动运营系统。
+面向单个 Amazon Ads 运营环境的 **Hermes 原生、确定性、审批门控、可恢复、可独立验证** 的广告全托管系统。
 
-它只解决广告运营，不接管 Seller Central 账户、收款、税务、申诉、Listing 或订单。Amazon 官方 MCP 是广告能力层；本项目负责广告策略、权限、原子执行、验证、审计和简明 Web 主控。
+Amazon 官方 MCP 提供实时广告能力；本项目负责报告证据、策略、结构化运营计划、权限、原子执行、人工高风险审批、独立验证、恢复、审计和简明 Web 主控。项目不接管 Seller Central、收款、税务、申诉、Listing 或订单。
 
-## 核心闭环
+## 完整闭环
 
 ```text
-Amazon Ads 官方 MCP / Reports / Recommendations / Marketing Stream
+Amazon Ads MCP / Reports / Recommendations / Marketing Stream
                               |
                               v
-Hermes Main（采集、解释、同步真实 Tool Schema）
-                              |
-                              v
-确定性策略引擎（成熟度、阈值、目标 ACOS、冷却期）
-                              |
-                              v
-原子决策任务 ──> Hermes Executor（仅计划内单实体写入）
-                              |
-                              v
-Hermes Verifier（不同子代理、只读、重新查询 Amazon）
-                              |
-                              v
-SQLite 审计 + 简明 Web + 异常与熔断
+Hermes Main（读取、诊断、同步实时 Tool Schema）
+             |                                |
+             | 日常成熟决策                    | 高风险结构计划
+             v                                v
+确定性 Optimization Task             Payload-bound Approval Request
+             |                                |
+             |                         登录 Web 人工批准精确 Hash
+             |                                |
+             +--------------+-----------------+
+                            v
+Hermes Executor（当前任务、单实体、一次性预约、精确参数）
+                            |
+                            v
+Amazon 返回真实对象 ID → 控制面确定性绑定 → 渲染后续已审批参数
+                            |
+                            v
+不同 Hermes Session 的只读 Verifier 重新查询 Amazon
+                            |
+                            v
+SQLite 审计 + Web + 告警 + 恢复 + 存储熔断
 ```
 
-## 为什么不是黑盒
+## 权限模型
 
-每个可执行变化都保存：
+### 日常全自动
 
-- 使用的数据窗口、数据成熟度和 KPI；
-- 命中的确定性规则、证据、原因和计划值；
-- Amazon MCP 的真实注册工具名、JSON Schema 与 Schema 哈希；
-- Executor 会话、原子预约令牌、工具参数、结构化结果；
-- 独立 Verifier 的真实只读工具调用、证据 Action ID、预期值、实际值和差异；
-- 所有允许、阻断、失败、漂移、预算和资格异常。
+数据成熟且满足确定性规则时，无需逐次询问：
 
-LLM 可以解释和编排，但不能凭自然语言直接产生广告写入。
+- Bid 小幅升降；
+- Budget 小幅升降；
+- Placement 调整；
+- 否定精准；
+- 精准关键词收割；
+- 经过明确规则限定的状态变化；
+- 已有 Campaign 的日常优化。
 
-## 广告运营能力
+### 人工批准后自动执行
 
-当前确定性策略覆盖：
+Main 可以从实时 MCP Schema 构建完整方案并请求批准：
 
-- 成熟窗口内零订单浪费目标的竞价下降；
-- 超目标 ACOS 目标的受控竞价下降；
-- 稳定低 ACOS 目标的小幅放量；
-- 搜索词否定精准；
-- 有订单且 ACOS 达标的搜索词精准收割；
-- 预算接近耗尽且表现达标的 Campaign 预算提升；
-- Top of Search 表现优秀时的 Placement 调整；
-- Amazon 官方 Recommendations 的受控接收（默认不自动应用）；
-- Marketing Stream 去重、预算接近耗尽和广告失去资格告警；
-- Sponsored Products、Sponsored Brands、Sponsored Display、Sponsored TV 数据按 `ad_product` 保持区分。
+- Campaign 创建；
+- Ad Group 创建；
+- Keyword、Target、Product Ad 创建；
+- Portfolio 和重要状态调整；
+- 大幅或结构性预算变化；
+- 可拆解、可逐项验证的市场扩展；
+- 其他被实时 Catalog 判定为 high/critical、但影响范围明确的广告操作。
 
-策略输入必须来自 Amazon 实际数据。归因尚未成熟、数据过旧、窗口过短或关键字段缺失时只观察，不写入。
+用户批准的是一份规范化计划 Hash，不是一句自然语言。批准绑定：Profile、工具名、每个参数、预期状态、依赖、预算暴露、有效期和决策集合。参数变化、过期、重复消费、依赖未成功或 Schema 漂移都会阻断。
+
+### 永久禁止
+
+- Billing、付款和发票；
+- 用户、角色、权限、邀请和账户链接；
+- Account/Profile 删除；
+- 不可逆 Delete；
+- 未知 MCP 语义；
+- 未确认的实时 Schema 漂移；
+- 无法拆解和独立验证的黑盒 Composite/Bulk Workflow。
+
+Archive、重要暂停及其他可恢复的高风险广告操作可以进入人工审批，而不是一刀切永久禁止。
+
+## Campaign 多步骤创建
+
+一个 Campaign 计划可一次性人工批准，但始终按原子动作执行：
+
+1. 创建 Campaign；
+2. 从结构化成功结果提取唯一 Amazon Campaign ID；
+3. 将该 ID 绑定到审批计划中的逻辑对象；
+4. 确定性渲染已审批的 Ad Group 参数；
+5. 创建并绑定 Ad Group ID；
+6. 依次创建 Target、Keyword、Product Ad；
+7. 任一前置动作不成功、结果不确定或无法提取唯一 ID，立即阻断后续动作；
+8. Executor 完成后，由不同 Session 的 Verifier 对每个真实对象重新查询。
+
+依赖模板使用：
+
+```text
+{{decision:<plan_key>.entity_id}}
+```
+
+模板、依赖和预期状态属于审批 Hash；运行时只能将已确认的真实 Amazon ID 填入该位置，不能更改其他参数。
 
 ## Hermes 原生集成
 
-插件使用 Hermes `v2026.7.7.2` / `hermes-agent==0.18.2` 已验证的接口：
+项目锁定并检查 `hermes-agent==0.18.2`（tag `v2026.7.7.2`）正式插件接口：
 
-- `register_tool`；
-- `pre_llm_call`；
-- `pre_tool_call`；
-- `post_tool_call`；
+- `register_tool`：15 个 Amazon Ads 控制工具；
+- `register_command`：`/ads-approvals`、`/ads-approve`、`/ads-reject`；
+- `pre_llm_call` / `post_llm_call`；
+- `pre_tool_call` / `post_tool_call`；
+- `on_session_start` / `on_session_end` / `on_session_finalize` / `on_session_reset`；
 - `subagent_start` / `subagent_stop`；
 - namespaced Skill；
-- `delegate_task` 创建真实 Executor 和 Verifier 子代理。
+- `delegate_task` 的真实子 Session。
 
-插件从 Hermes 实时工具注册表读取 `mcp_amazon_ads_*` 工具及 Schema，不维护猜测性的静态工具名白名单。工具新增、移除或 Schema 漂移会进入告警；未确认的漂移写工具 fail-closed。
+Main、Executor、Verifier 的权限不是 Prompt 约定：
 
-## 官方能力对齐
+- Main 没有写角色；
+- Executor 必须由 `subagent_start` 绑定到精确任务，并带 `[ads-task:<id>] [ads-role:executor]`；
+- Verifier 必须是不同 Session，并带 `[ads-role:verifier]`；
+- Executor 进入验证阶段后不能重新绑定；
+- 一个 Session 不能同时绑定不同任务或角色；
+- Verifier 只能使用控制面记录的新 Amazon 只读 Action 作为证据。
 
-项目的无凭据 CI 会读取 Amazon 官方 Advanced Tools Postman Collection，并检查以下能力仍存在：
+Hermes 0.18.2 的全局 Delegation Model 不保证每个子代理使用不同模型，因此**不同 Session 是硬要求，不同模型是部署能力允许时的强化项**。Hermes 报告模型 fallback 时，控制面自动切换为 `OBSERVE` 并关闭写入。
 
-- OAuth / Profiles / Manager Accounts；
-- Sponsored Products v3；
-- Sponsored Brands v4；
-- Sponsored Display；
-- Reporting；
-- Marketing Stream；
-- Recommendations；
-- Budget；
-- Test Accounts；
-- Exports。
+## 人工审批交互
 
-参考：
+默认批准入口是登录后的控制 Web：
 
-- https://github.com/amzn/ads-advanced-tools-docs/tree/main/postman
-- https://advertising-ai.amazon.com/mcp
-- https://advertising.amazon.com/about-api
-- https://advertising.amazon.com/library/guides/amazon-marketing-stream
+- Cookie Session；
+- Origin 校验；
+- CSRF；
+- 精确确认短语；
+- Payload Hash；
+- 审批有效期；
+- 每个决策一次性消费。
 
-## 执行安全边界
+Hermes Slash Command 支持 CLI 和 Gateway，但命令批准默认关闭。只有在**没有 Terminal、File 和环境读取能力的受限 Gateway** 中，才应把独立的 `ADS_CONTROL_OPERATOR_TOKEN` 提供给 Hermes 并显式设置：
 
-以下规则无法从 Web 或普通设置关闭：
+```bash
+ADS_CONTROL_ENABLE_COMMAND_APPROVAL=true
+```
 
-- 必须使用实时 MCP Catalog；
-- 工具名、语义、族、风险或 Schema 任一漂移都会阻断写入；
-- 所有广告写入必须来自确定性计划；
-- Main 不能写，Verifier 不能写；
-- Executor 只能执行当前绑定任务，Verifier 必须使用不同且当前有效的会话；
-- 每次只允许一个广告实体；
-- 决策必须原子预约；过期、部分成功或未知结果进入 `uncertain`，不能盲目重放；
-- 跨周期等价动作有冷却锁；
-- Delete/Archive、账户/账单管理、高风险复合或批量工具始终禁止；
-- 任务完成前必须由不同 Verifier 进行写后新读取，并引用控制面记录的结构化证据。
+一般部署中，Hermes 进程只获得 `ADS_CONTROL_AGENT_TOKEN`；`ADS_CONTROL_OPERATOR_TOKEN` 仅由控制面服务持有。AI 可以申请和解释审批，但不能调用批准接口。
 
-其他默认限制：单次竞价 20%、预算 25%、每任务 50 次、每日 250 次、每日新 Campaign 2 个。Campaign 创建与官方 Recommendation 自动应用默认关闭。
+## 实时 MCP 合约
 
-## Web 主控
+插件直接从 Hermes 的 `mcp-amazon-ads` 注册表读取：
 
-页面保持简单，只有五个区域：
+- 实际注册工具名；
+- Native Name；
+- JSON Schema；
+- Enabled 状态。
 
-1. **总览**：最新广告 KPI、周期、任务、Executor/Verifier；
-2. **决策**：规则、实体、证据、计划和状态；
-3. **变更与验证**：工具调用、结构化结果、独立读回差异；
-4. **异常**：Schema 漂移、工具消失、预算、资格、执行和验证异常；
-5. **Profiles / MCP**：Profile 策略、MCP 工具目录、模式和核心阈值。
+控制面独立推导 read/job/write/unknown、Family 和 Risk。工具新增、移除、Schema、语义、Family 或 Risk 漂移都会记录；未知和未确认漂移 fail-closed。
 
-运行模式：
+CI 同时读取 Amazon 官方 Advanced Tools Postman Collection，规范化方法、路径、Header 和 Body 结构并固定语义指纹。Postman 是独立官方 REST 能力参考，运行时真实授权仍以 Hermes MCP Catalog 为准。
 
-- `OBSERVE`：默认；读取、规划和展示，不写；
-- `AUTOPILOT`：Executor 在全部硬规则内自动执行；
-- `PAUSED`：阻断所有 Amazon Ads MCP 读取、数据任务和写入。
+## 写入安全
+
+- 每个 Amazon 写调用最多一个实体；
+- 所有写入必须匹配唯一确定性 Decision；
+- 日常可变字段写入前必须重新查询并执行 Compare-And-Set；
+- 结构计划必须匹配审批后的规范化参数或确定性 ID 模板；
+- SQLite `BEGIN IMMEDIATE` 原子预约；
+- 任务、每日、Campaign 创建、预算暴露及冷却限制；
+- 不确定 Amazon Mutation 永不盲目重放；
+- 回调 Outbox 只重投结果信封，不重调 Amazon；
+- 写后必须独立回读；
+- Schema 漂移、控制面故障、Outbox 超限、存储硬压力和不可信模型 fallback 自动阻断写入。
+
+## 运行资源
+
+目标 2C2G Linux VPS 默认：
+
+```yaml
+delegation:
+  max_concurrent_children: 1
+  max_spawn_depth: 1
+  orchestrator_enabled: false
+```
+
+Executor 与 Verifier 顺序运行。报告流式处理，单次只保留有限行和一个报告。资源压力可以推迟非紧急采集，但不能降低审批、CAS、限额、验证和恢复要求。
 
 ## 安装
 
@@ -132,21 +184,12 @@ sudo -u amazonbot git clone <repo> /opt/hermes-amazon-ads-automation
 cd /opt/hermes-amazon-ads-automation
 sudo -u amazonbot bash scripts/install.sh
 
-python3 scripts/control_cli.py generate-token
+python3 scripts/control_cli.py generate-token   # agent token
+python3 scripts/control_cli.py generate-token   # optional operator token
 python3 scripts/control_cli.py hash-password
-python3 scripts/control_cli.py doctor --full
 ```
 
-将结果写入 `/etc/hermes-amazon-ads-control.env`，参考 `deploy/control.env.example`：
-
-```bash
-sudo install -d -o amazonbot -g amazonbot /var/lib/hermes-amazon-ads-control
-sudo cp deploy/amazon-ads-control.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now amazon-ads-control
-```
-
-合并 `config/hermes-autopilot.example.yaml` 到 Hermes 配置，启用插件并重启：
+根据 `deploy/control.env.example` 写入控制面环境，启用 systemd，然后合并 `config/hermes-amazon-chain.example.yaml`：
 
 ```bash
 hermes plugins enable amazon-ads-control
@@ -154,20 +197,24 @@ hermes plugins list
 hermes gateway restart
 ```
 
-控制面只监听 `127.0.0.1:8790`。公网访问必须经过 HTTPS Nginx/Caddy；不要直接暴露 8790。
+控制面只监听 `127.0.0.1:8790`。远程访问必须经过 HTTPS Nginx/Caddy，不得直接暴露 8790。
 
 ## 上线顺序
 
 1. 保持 `OBSERVE`；
 2. 完成 Amazon Ads MCP OAuth；
-3. `hermes mcp test amazon-ads`；
-4. 运行 Skill，同步真实 MCP Catalog；
-5. 读取 Test Account 或真实账户，只做报告和规划；
-6. 查看 Web 中工具、Schema、KPI、决策和告警；
-7. 优先在 Amazon Ads Test Account 做写入/Verifier 验收；
-8. 再切换 `AUTOPILOT`。
+3. 验证 authenticated `initialize` / `tools/list`；
+4. 同步真实 Catalog，确认必要工具没有 unknown/drifted；
+5. 完成真实报告提交、轮询、下载、解压和归一化；
+6. 使用真实历史数据运行至少一个完整归因窗口；
+7. 在 Test Account 或低风险 Profile 创建一个小预算 Campaign 计划；
+8. 在 Web 核对并批准精确 Hash；
+9. 验证 Campaign → Ad Group → Target/Keyword → Ad 的真实 ID 绑定；
+10. 由不同 Verifier Session 完成全部 Amazon 回读；
+11. 完成 429、OAuth 刷新、重启、Outbox、备份恢复和存储压力演练；
+12. 再逐步扩大 `AUTOPILOT` 范围。
 
-## 测试与回测
+## 验证
 
 ```bash
 bash scripts/validate.sh
@@ -176,25 +223,6 @@ bash scripts/validate_deploy.sh
 PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" python3 tests/stress_recovery.py
 ```
 
-当前无凭据套件覆盖 120+ 项单元/集成测试、Python 3.11/3.12/3.13、分支覆盖率门槛、独立进程闭环、100 路原子预约竞争、1000 条流事件去重、200 路并发 HTTP、备份/完整性、Wheel 和全新安装、CLI、Nginx、systemd、前端语法、Secret Scan、Ruff 严重错误、Bandit 高严重性、真实 Playwright 浏览器、固定 Hermes 正式包及 Amazon 官方在线合同。精确数量以 CI 输出为准。
+无凭据套件覆盖策略、权限、审批 Hash、AI 不能自批、过期、重复消费、多步骤真实 ID 绑定、参数篡改、独立验证、回调、Outbox、SQLite、浏览器、部署、真实 Hermes 插件加载和 Amazon 官方合同。
 
-历史或 Shadow 快照可通过安装后的 CLI 重放：
-
-```bash
-amazon-ads-backtest snapshots.jsonl --fail-on-label-mismatch --output report.json
-```
-
-回放只能证明确定性规则一致、数据门槛正确及人工标签符合，不能证明广告增量或因果收益。完整测试分层见 `docs/TESTING.md`。
-
-仍必须在所有者环境完成的验收包括：OAuth 与刷新、真实 Profile/权限、报告生命周期、真实 MCP Catalog、Amazon 实际限流、Marketing Stream AWS 投递、历史账户 Shadow 评估、Test Account/低风险 Canary 写入、不同 Verifier 的 Amazon 读回、真实 VPS 重启及备份恢复。逐项清单见 `docs/PRODUCTION_ACCEPTANCE.md`。项目不会把 Mock、合成回放或端点可达性描述成真实 Amazon 成功。
-
-## 目录
-
-```text
-control-plane/amazon_ads_control/   策略、事务、回测、SQLite、HTTP 与 Web
-hermes-plugin/amazon_ads_control/   Hermes 插件和 Skill
-integrations/                       Marketing Stream 轻量接入
-scripts/                            安装、验证、官方契约检查
-config/ cron/ deploy/               Hermes、Cron、systemd、Nginx 示例
-tests/                              单元、集成、故障、压力、浏览器和真实 Hermes smoke
-```
+静态、Mock、历史回放和端点可达性不能证明广告增量效果，也不能替代所有者账户中的 OAuth、真实 MCP、Test Account/Canary 和归因窗口验收。详见 `docs/PRODUCTION_ACCEPTANCE.md`。
