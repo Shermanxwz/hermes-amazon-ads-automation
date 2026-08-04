@@ -49,7 +49,10 @@ def snapshot() -> dict[str, Any]:
         load_1m = 0.0
     pressure = load_1m / cpu if cpu else 0.0
 
-    if cpu <= 2 or memory_mb <= 2304:
+    # Memory is the binding constraint for report parsing and simultaneous
+    # Hermes children. A 2-core host automatically moves from constrained to
+    # balanced when upgraded from 2 GB to 4 GB.
+    if memory_mb <= 2304:
         tier = "constrained"
         max_profiles = 1
         max_children = 1
@@ -68,8 +71,6 @@ def snapshot() -> dict[str, Any]:
         chunk_rows = 10000
         max_in_memory_reports = 2
 
-    # High transient load only serializes non-urgent collection. It does not
-    # weaken strategy, verification or fail-closed controls.
     if pressure >= 1.25:
         max_profiles = 1
         max_children = 1
