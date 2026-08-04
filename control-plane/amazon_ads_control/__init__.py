@@ -7,4 +7,8 @@ __version__ = "3.0.0"
 
 _install_closed_loop()
 _install_strategy_hardening()
-del _install_closed_loop, _install_strategy_hardening
+
+from .api_extension import install as _install_api_extension
+_install_api_extension()
+
+del _install_closed_loop, _install_strategy_hardening, _install_api_extension
