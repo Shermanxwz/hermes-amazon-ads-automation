@@ -7,7 +7,7 @@ plugins:
 delegation:
   provider: custom:new-api-230385
   model: MiniMax-M3
-  max_concurrent_children: 2
+  max_concurrent_children: 1
   max_spawn_depth: 1
   orchestrator_enabled: false
   max_iterations: 35
@@ -25,6 +25,8 @@ cron:
   enabled: true
 
 approvals:
-  # No interactive approval is required for the bounded worker workflow.
-  # The amazon-ads-control plugin is the hard policy boundary.
+  # Routine bounded operations never wait on Hermes' native prompt.
+  # High-risk plans are paused in awaiting_approval and require either:
+  #   /ads-approve <approval_id> <payload_hash-prefix>
+  # or the authenticated approval panel in the local control Web.
   cron_mode: allow
