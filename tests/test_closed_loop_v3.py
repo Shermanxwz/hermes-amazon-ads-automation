@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import date, timedelta
-import hashlib
 import unittest
 
-from amazon_ads_control.catalog import descriptor_from_payload
 from amazon_ads_control.reporting import snapshot_hash
 from amazon_ads_control.strategy import OptimizationEngine, StrategyPolicy
 from helpers import Environment, READ_TARGET, WRITE_TARGET, one_target_snapshot
@@ -18,20 +16,20 @@ class ClosedLoopV3Tests(unittest.TestCase):
     def tearDown(self):
         self.env.close()
 
-    def _executor_read(self, task, decision, bid=1.0, session="exec"):
+    def _executor_read(self, task, decision, bid=1.0, session="exec", call_id="pre-read"):
         self.env.service.bind_worker({
             "task_id": task["id"], "worker_session_id": session, "role": "executor",
             "goal": f"[ads-task:{task['id']}] [ads-role:executor]",
         })
         allowed = self.env.service.authorize_tool({
             "tool_name": READ_TARGET["registered_name"], "args": {"targetId": "t1"},
-            "session_id": session, "tool_call_id": "pre-read",
+            "session_id": session, "tool_call_id": call_id,
         })
         self.assertTrue(allowed["allowed"])
         read = self.env.service.finish_tool({
             "tool_name": READ_TARGET["registered_name"], "args": {"targetId": "t1"},
             "result": {"targetId": "t1", "bid": bid}, "session_id": session,
-            "task_id": task["id"], "tool_call_id": "pre-read",
+            "task_id": task["id"], "tool_call_id": call_id,
         })
         return self.env.service.prepare_write({
             "decision_id": decision["id"], "evidence_action_id": read["action_id"], "session_id": session,
@@ -78,14 +76,15 @@ class ClosedLoopV3Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "normalized_hash"):
             self.env.service.plan_cycle({"snapshot": snapshot, "lineage": wrong}, "main")
         other = one_target_snapshot(profile_id="other")
+        other_lineage = dict(lineage); other_lineage["normalized_hash"] = snapshot_hash(other)
         with self.assertRaisesRegex(ValueError, "profile"):
-            self.env.service.plan_cycle({"snapshot": other, "lineage": lineage}, "main")
+            self.env.service.plan_cycle({"snapshot": other, "lineage": other_lineage}, "main")
 
     def test_compare_and_set_blocks_stale_before_value(self):
         _cycle, task, decision = self.env.one_decision_task()
         with self.assertRaisesRegex(ValueError, "before value"):
             self._executor_read(task, decision, bid=0.9)
-        self._executor_read(task, decision, bid=1.0, session="exec-fresh")
+        self._executor_read(task, decision, bid=1.0, session="exec", call_id="pre-read-fresh")
 
     def test_write_requires_precondition_and_exact_callback_identity(self):
         _cycle, task, decision = self.env.one_decision_task()
