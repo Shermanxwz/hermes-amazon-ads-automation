@@ -60,9 +60,69 @@ CREATE_TASK = {
         "required": ["cycle_id"],
     },
 }
+MANAGED_PLAN = {
+    "name": "ads_control_create_managed_plan",
+    "description": "Create a payload-bound high-risk structural plan from live Amazon MCP schemas. The AI can request approval but can never approve its own plan.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 240},
+            "objective": {"type": "string", "maxLength": 8000},
+            "profile": {
+                "type": "object",
+                "properties": {
+                    "profile_id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "marketplace": {"type": "string"},
+                    "country_code": {"type": "string"},
+                    "currency": {"type": "string"},
+                },
+                "required": ["profile_id"],
+            },
+            "actions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tool_name": {"type": "string"},
+                        "action_type": {"type": "string"},
+                        "entity_type": {"type": "string"},
+                        "entity_id": {"type": "string"},
+                        "arguments": {"type": "object"},
+                        "expected_state": {"type": "object", "minProperties": 1},
+                        "reason": {"type": "string"},
+                        "evidence": {"type": "object"},
+                        "risk": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                        "maximum_daily_budget": {"type": "number", "minimum": 0},
+                        "priority": {"type": "integer"},
+                    },
+                    "required": ["tool_name", "action_type", "arguments", "expected_state"],
+                },
+            },
+            "approval_summary": {"type": "string", "maxLength": 1000},
+            "approval_ttl_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+        },
+        "required": ["title", "profile", "actions"],
+    },
+}
+REQUEST_APPROVAL = {
+    "name": "ads_control_request_approval",
+    "description": "Move an existing deterministic task into payload-bound operator approval. This tool only requests approval; it cannot approve.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string"},
+            "summary": {"type": "string", "maxLength": 1000},
+            "ttl_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+        },
+        "required": ["task_id"],
+    },
+}
 STATUS = {
     "name": "ads_control_status",
-    "description": "Read role, mode, catalog, report lifecycle, runtime health and bound deterministic decisions.",
+    "description": "Read role, mode, catalog, report lifecycle, approvals, runtime health and bound deterministic decisions.",
     "parameters": {"type": "object", "properties": {}},
 }
 NOTE = {
