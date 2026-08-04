@@ -94,6 +94,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: >-
+          python scripts/check_amazon_mcp_contract.py
+          --fixture tests/fixtures/amazon_ads_mcp_contract.json
+          --check
+          --output official/amazon-mcp-contract.ci.json
+      - run: >-
           python scripts/sync_official_contracts.py
           --check
           --strict-extended
