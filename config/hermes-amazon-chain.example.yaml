@@ -39,9 +39,13 @@ providers:
         max_output_tokens: 65536
         supports_reasoning: true
 
+# AMAZON_ADS_MCP_URL must be the exact endpoint supplied by Amazon/onboarding.
+# Set ADS_MCP_DEFAULT_REGION=na|eu|fe in the Hermes process environment. The
+# public MCP announcement confirms global availability but does not publish
+# separate EU/FE MCP hostnames, so this example intentionally does not guess.
 mcp_servers:
   amazon-ads:
-    url: https://advertising-ai.amazon.com/mcp
+    url: ${AMAZON_ADS_MCP_URL}
     auth: oauth
     oauth:
       client_id: ${AMAZON_ADS_MCP_CLIENT_ID}
