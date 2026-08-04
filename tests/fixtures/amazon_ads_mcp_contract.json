@@ -1,0 +1,64 @@
+{
+  "initialize": {
+    "protocolVersion": "2025-06-18",
+    "serverInfo": {"name": "amazon-ads-fixture", "version": "sandbox"},
+    "capabilities": {"tools": {"listChanged": true}}
+  },
+  "session_id_present": true,
+  "tools": [
+    {
+      "name": "account_management-query_advertiser_accounts",
+      "description": "Query advertiser account and profile access",
+      "inputSchema": {"type": "object", "properties": {}},
+      "annotations": {"readOnlyHint": true}
+    },
+    {
+      "name": "reporting-create_report",
+      "description": "Create performance report job",
+      "inputSchema": {"type": "object", "required": ["profileId"], "properties": {"profileId": {"type": "string"}}}
+    },
+    {
+      "name": "campaign_management-query_campaigns",
+      "description": "Query campaigns",
+      "inputSchema": {"type": "object", "properties": {}},
+      "annotations": {"readOnlyHint": true}
+    },
+    {
+      "name": "campaign_management-create_campaign",
+      "description": "Create campaign",
+      "inputSchema": {"type": "object", "required": ["campaigns"], "properties": {"campaigns": {"type": "array", "maxItems": 1}}}
+    },
+    {
+      "name": "campaign_management-update_campaign",
+      "description": "Update campaign state and budget",
+      "inputSchema": {"type": "object", "properties": {"campaigns": {"type": "array", "maxItems": 1}}}
+    },
+    {
+      "name": "workflow-create_end_to_end_sponsored_products_campaign",
+      "description": "Create an end-to-end Sponsored Products campaign with campaign, ad group and ad",
+      "inputSchema": {"type": "object", "properties": {"plan": {"type": "object"}}}
+    },
+    {
+      "name": "workflow-expand_campaign_to_new_locale",
+      "description": "Expand campaign to a new locale and country",
+      "inputSchema": {"type": "object", "properties": {"sourceCampaignId": {"type": "string"}}}
+    },
+    {
+      "name": "billing-query_invoices",
+      "description": "Query billing invoices and financial data",
+      "inputSchema": {"type": "object", "properties": {}},
+      "annotations": {"readOnlyHint": true}
+    },
+    {
+      "name": "account_management-update_permissions",
+      "description": "Update users roles and permissions",
+      "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+      "name": "campaign_management-delete_campaign",
+      "description": "Delete campaign",
+      "inputSchema": {"type": "object", "properties": {"campaignId": {"type": "string"}}},
+      "annotations": {"destructiveHint": true}
+    }
+  ]
+}
