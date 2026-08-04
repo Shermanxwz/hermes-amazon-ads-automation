@@ -11,6 +11,7 @@ from amazon_ads_control.service import ControlService
 CREATE_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_create_campaign",
     "native_name": "campaign_management-create_campaign",
+    "source": "hermes-registry:na",
     "schema": {
         "description": "Create one campaign",
         "parameters": {
@@ -35,6 +36,7 @@ CREATE_CAMPAIGN = {
 UPDATE_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_update_campaign",
     "native_name": "campaign_management-update_campaign",
+    "source": "hermes-registry:na",
     "schema": {
         "description": "Update one campaign",
         "parameters": {
@@ -59,6 +61,7 @@ UPDATE_CAMPAIGN = {
 EXPAND_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_expand_campaign",
     "native_name": "campaign_management-expand_campaign",
+    "source": "hermes-registry:na",
     "schema": {
         "description": "Expand campaign to another marketplace",
         "parameters": {
