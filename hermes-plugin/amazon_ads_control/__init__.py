@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import json
+import os
 from pathlib import Path
 import re
 import threading
@@ -12,6 +13,7 @@ from . import client, outbox, resources, schemas, tools
 
 PREFIX = "mcp_amazon_ads_"
 TOOLSET = "mcp-amazon-ads"
+TOOLSET_PATTERN = re.compile(r"^mcp-amazon-ads(?:-(na|eu|fe))?$", re.I)
 TASK_MARKER = re.compile(r"\[ads-task:([a-f0-9]{8,32})\]", re.I)
 ROLE_MARKER = re.compile(r"\[ads-role:(executor|verifier)\]", re.I)
 _CATALOG_LOCK = threading.Lock()
@@ -36,15 +38,48 @@ def _flush_result_outbox() -> dict[str, Any]:
     return outbox.flush(_result_sender, limit=100)
 
 
+def _configured_toolsets(registry) -> list[str]:
+    configured = {
+        item.strip()
+        for item in os.getenv("ADS_MCP_TOOLSETS", "").split(",")
+        if item.strip()
+    }
+    available = (
+        registry.get_registered_toolset_names()
+        if hasattr(registry, "get_registered_toolset_names")
+        else [TOOLSET]
+    )
+    matching = [name for name in available if TOOLSET_PATTERN.fullmatch(str(name))]
+    if configured:
+        matching = [name for name in matching if name in configured]
+    return sorted(set(matching))
+
+
 def _registry_catalog() -> list[dict[str, Any]]:
     from tools.registry import registry
 
     rows: list[dict[str, Any]] = []
-    for name in sorted(registry.get_tool_names_for_toolset(TOOLSET)):
-        if name.startswith(PREFIX):
+    default_region = os.getenv("ADS_MCP_DEFAULT_REGION", "na").strip().lower()
+    if default_region not in {"na", "eu", "fe"}:
+        raise ValueError("ADS_MCP_DEFAULT_REGION must be na, eu or fe")
+    for toolset in _configured_toolsets(registry):
+        match = TOOLSET_PATTERN.fullmatch(toolset)
+        if not match:
+            continue
+        region = (match.group(1) or default_region).lower()
+        server_name = toolset[len("mcp-"):]
+        registered_prefix = "mcp_" + re.sub(r"[^a-z0-9]+", "_", server_name.lower()) + "_"
+        for name in sorted(registry.get_tool_names_for_toolset(toolset)):
+            if not name.startswith(registered_prefix):
+                continue
             rows.append({
                 "registered_name": name,
-                "native_name": name[len(PREFIX):],
+                "native_name": name[len(registered_prefix):],
+                # Store all regional tools in one Amazon catalog namespace so
+                # removal/drift reconciliation remains atomic. Region remains
+                # explicit in source and is machine-checked against Profile.
+                "server_name": "amazon-ads",
+                "source": f"hermes-registry:{region}",
                 "schema": registry.get_schema(name) or {},
                 "enabled": True,
             })
@@ -65,7 +100,10 @@ def sync_live_catalog(force: bool = False) -> dict[str, Any]:
         except Exception as exc:
             return {"error": "hermes_registry_unavailable", "detail": str(exc)}
         if not rows:
-            return {"error": "amazon_ads_toolset_empty", "toolset": TOOLSET}
+            return {
+                "error": "amazon_ads_toolset_empty",
+                "toolsets": ["mcp-amazon-ads", "mcp-amazon-ads-na", "mcp-amazon-ads-eu", "mcp-amazon-ads-fe"],
+            }
         response = client.request("POST", "/api/agent/catalog-sync", {"tools": rows}, timeout=15)
         if not response.get("error"):
             _CATALOG = {row["registered_name"]: row for row in rows}
@@ -115,6 +153,7 @@ def pre_llm_call(session_id=None, **kwargs):
         "execution_enabled": state.get("execution_enabled"),
         "catalog": state.get("catalog"),
         "catalog_sync": catalog,
+        "regional_mcp": state.get("regional_mcp"),
         "reports": state.get("reports"),
         "approvals_pending": compact_pending,
         "runtime_resources": runtime,
