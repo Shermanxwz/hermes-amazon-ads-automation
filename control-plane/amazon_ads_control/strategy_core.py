@@ -123,6 +123,7 @@ class StrategyPolicy:
     allow_state_changes: bool = False
     allow_official_recommendation_apply: bool = False
     recommendation_types: tuple[str, ...] = ("BID", "BUDGET", "KEYWORD", "TARGET")
+    auto_write_ad_products: tuple[str, ...] = ("SPONSORED_PRODUCTS", "SPONSORED_BRANDS", "SPONSORED_DISPLAY")
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any] | None) -> "StrategyPolicy":
@@ -130,14 +131,20 @@ class StrategyPolicy:
         recs = d.get("recommendation_types", cls.recommendation_types)
         if isinstance(recs, str):
             recs = [x.strip() for x in recs.split(",") if x.strip()]
+        products = d.get("auto_write_ad_products", cls.auto_write_ad_products)
+        if isinstance(products, str):
+            products = [x.strip() for x in products.split(",") if x.strip()]
         target = _clamp(_d(d.get("target_acos"), "30"), Decimal("1"), Decimal("500"))
         maximum = _clamp(max(target, _d(d.get("max_acos"), "45")), Decimal("1"), Decimal("1000"))
+        min_bid = max(Decimal("0.01"), _d(d.get("min_bid"), "0.02"))
+        max_bid = max(min_bid, _d(d.get("max_bid"), "1000"))
+        min_budget = max(Decimal("0.01"), _d(d.get("min_budget"), "1"))
+        max_budget = max(min_budget, _d(d.get("max_budget"), "1000000"))
         return cls(
             target_acos=target, max_acos=maximum,
             min_clicks=max(1, _i(d.get("min_clicks"), 8)), min_orders=max(1, _i(d.get("min_orders"), 2)),
             min_spend=max(Decimal("0"), _d(d.get("min_spend"), "10")),
-            waste_clicks=max(1, _i(d.get("waste_clicks"), 12)),
-            waste_spend=max(Decimal("0"), _d(d.get("waste_spend"), "20")),
+            waste_clicks=max(1, _i(d.get("waste_clicks"), 12)), waste_spend=max(Decimal("0"), _d(d.get("waste_spend"), "20")),
             harvest_orders=max(1, _i(d.get("harvest_orders"), 2)),
             harvest_max_acos=_clamp(_d(d.get("harvest_max_acos"), str(target)), Decimal("1"), Decimal("1000")),
             bid_increase_pct=_clamp(_d(d.get("bid_increase_pct"), "10"), Decimal("0"), Decimal("100")),
@@ -151,29 +158,24 @@ class StrategyPolicy:
             max_budget_change_pct=_clamp(_d(d.get("max_budget_change_pct"), "25"), Decimal("1"), Decimal("100")),
             max_placement_change_points=_clamp(_d(d.get("max_placement_change_points"), "25"), Decimal("1"), Decimal("900")),
             attribution_lag_days=max(0, _i(d.get("attribution_lag_days"), 2)),
-            min_window_days=max(1, _i(d.get("min_window_days"), 7)),
-            max_data_age_days=max(1, _i(d.get("max_data_age_days"), 7)),
+            min_window_days=max(1, _i(d.get("min_window_days"), 7)), max_data_age_days=max(1, _i(d.get("max_data_age_days"), 7)),
             cooldown_hours=max(0, _i(d.get("cooldown_hours", d.get("decision_cooldown_hours")), 24)),
             learning_min_clicks=max(1, _i(d.get("learning_min_clicks"), 12)),
-            stable_min_orders=max(1, _i(d.get("stable_min_orders"), 4)),
-            scale_min_orders=max(1, _i(d.get("scale_min_orders"), 5)),
+            stable_min_orders=max(1, _i(d.get("stable_min_orders"), 4)), scale_min_orders=max(1, _i(d.get("scale_min_orders"), 5)),
             min_confidence_to_reduce=_clamp(_d(d.get("min_confidence_to_reduce"), "0.55"), Decimal("0"), Decimal("1")),
             min_confidence_to_scale=_clamp(_d(d.get("min_confidence_to_scale"), "0.70"), Decimal("0"), Decimal("1")),
             max_decisions_per_cycle=max(1, _i(d.get("max_decisions_per_cycle"), 25)),
-            min_bid=max(Decimal("0.01"), _d(d.get("min_bid"), "0.02")),
-            max_bid=max(Decimal("0.02"), _d(d.get("max_bid"), "1000")),
-            min_budget=max(Decimal("0.01"), _d(d.get("min_budget"), "1")),
-            max_budget=max(Decimal("1"), _d(d.get("max_budget"), "1000000")),
+            min_bid=min_bid, max_bid=max_bid, min_budget=min_budget, max_budget=max_budget,
             allow_bid_changes=_bool(d.get("allow_bid_changes"), True),
             allow_budget_changes=_bool(d.get("allow_budget_changes"), True),
             allow_budget_decreases=_bool(d.get("allow_budget_decreases"), True),
-            allow_negatives=_bool(d.get("allow_negatives"), True),
-            allow_harvest=_bool(d.get("allow_harvest"), True),
+            allow_negatives=_bool(d.get("allow_negatives"), True), allow_harvest=_bool(d.get("allow_harvest"), True),
             allow_placement_changes=_bool(d.get("allow_placement_changes"), True),
             allow_campaign_creation=_bool(d.get("allow_campaign_creation"), False),
             allow_state_changes=_bool(d.get("allow_state_changes"), False),
             allow_official_recommendation_apply=_bool(d.get("allow_official_recommendation_apply"), False),
-            recommendation_types=tuple(str(x).upper() for x in recs),
+            recommendation_types=tuple(sorted({str(x).upper() for x in recs if str(x).strip()})),
+            auto_write_ad_products=tuple(sorted({str(x).upper() for x in products if str(x).strip()})),
         )
 
 
