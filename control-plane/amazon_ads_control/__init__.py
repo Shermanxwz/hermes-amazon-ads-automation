@@ -4,7 +4,7 @@ from .closed_loop import install as _install_closed_loop
 from .closed_loop_fixes import install as _install_closed_loop_fixes
 from .strategy_hardening import install as _install_strategy_hardening
 
-__version__ = "3.2.1"
+__version__ = "3.2.0"
 
 _install_closed_loop()
 _install_closed_loop_fixes()
