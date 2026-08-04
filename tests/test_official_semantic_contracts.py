@@ -44,7 +44,7 @@ class SemanticContractTests(unittest.TestCase):
         manifest = module.summarize(raw, "fixture")
         endpoint = manifest["endpoints"][0]
         self.assertEqual(endpoint["method"], "POST")
-        self.assertEqual(endpoint["path"], "/sp/v3/campaigns")
+        self.assertEqual(endpoint["endpoint_path"], "/sp/v3/campaigns")
         self.assertIn("$.campaigns[]", endpoint["body"]["json_paths"])
         auth = next(item for item in endpoint["headers"] if item["name"] == "authorization")
         self.assertTrue(auth["redacted"])
