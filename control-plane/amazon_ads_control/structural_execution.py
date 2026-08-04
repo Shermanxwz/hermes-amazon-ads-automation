@@ -135,23 +135,31 @@ def install() -> None:
             for index, item in enumerate(actions)
             if isinstance(item, dict) and str(item.get("plan_key") or "").strip()
         }
-        if len(supplied_keys) != sum(
-            1 for item in actions if isinstance(item, dict) and str(item.get("plan_key") or "").strip()
-        ):
+        supplied_count = sum(
+            1 for item in actions
+            if isinstance(item, dict) and str(item.get("plan_key") or "").strip()
+        )
+        if len(supplied_keys) != supplied_count:
             raise ValueError("managed structural plan_key values must be unique")
         for index, action in enumerate(actions):
             if not isinstance(action, dict):
                 continue
             refs = _refs(action.get("arguments"))
-            dependencies = {str(item) for item in action.get("depends_on", [])} if isinstance(action.get("depends_on"), list) else set()
+            dependencies = {
+                str(item) for item in action.get("depends_on", [])
+            } if isinstance(action.get("depends_on"), list) else set()
             if refs - dependencies:
                 raise ValueError(f"actions[{index}] placeholders must also appear in depends_on")
-            missing = refs - set(supplied_keys)
+            missing = dependencies - set(supplied_keys)
             if missing:
-                raise ValueError(f"actions[{index}] references unknown plan_key(s): {', '.join(sorted(missing))}")
-            for reference in refs:
+                raise ValueError(
+                    f"actions[{index}] references unknown plan_key(s): {', '.join(sorted(missing))}"
+                )
+            for reference in dependencies:
                 if supplied_keys[reference] >= index:
-                    raise ValueError(f"actions[{index}] dependency {reference} must precede the dependent action")
+                    raise ValueError(
+                        f"actions[{index}] dependency {reference} must precede the dependent action"
+                    )
         return original_create_plan(self, payload, actor)
 
     def match(self, task_id: str, tool: dict[str, Any], args: dict[str, Any]):
