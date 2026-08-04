@@ -15,11 +15,13 @@ render=function(){
 
   const storage=d.storage||{}, files=storage.files||{}, filesystem=storage.filesystem||{};
   const maintenance=storage.latest_maintenance||{}, pressure=maintenance.pressure||"normal";
-  const storagePill=$("#storage-pill");
-  if(storagePill){
-    storagePill.className=pressure==="hard"?"bad":pressure==="soft"?"warn":"good";
-    storagePill.textContent=`存储 ${fmt(files.total_mb)}MB / 空闲 ${fmt(filesystem.free_mb)}MB`;
+  let storagePill=$("#storage-pill");
+  if(!storagePill){
+    storagePill=document.createElement("span");storagePill.id="storage-pill";
+    document.querySelector(".status-strip")?.appendChild(storagePill);
   }
+  storagePill.className=pressure==="hard"?"bad":pressure==="soft"?"warn":"good";
+  storagePill.textContent=`存储 ${fmt(files.total_mb)}MB / 空闲 ${fmt(filesystem.free_mb)}MB`;
 
   const reportsNode=$("#reports");
   if(reportsNode)reportsNode.innerHTML=table(["更新时间","Profile / 类型","窗口","状态","尝试","证据"],(reports.recent||[]).map(x=>`<tr><td>${esc(x.updated_at)}</td><td><span class="mono">${esc(x.profile_id)}</span><br>${esc(x.report_type)}</td><td>${esc(x.start_date)} → ${esc(x.end_date)}</td><td>${badge(x.status,statusKind(x.status))}</td><td>${fmt(x.attempt_count)}</td><td class="mono">${esc((x.normalized_hash||"").slice(0,12))}</td></tr>`));
@@ -34,7 +36,12 @@ render=function(){
   const runtimeNode=$("#runtime-status");
   if(runtimeNode)runtimeNode.innerHTML=table(["组件","更新时间","资源 / 队列","状态"],runtimeRows);
 
-  const rollupNode=$("#alert-rollups");
+  let rollupNode=$("#alert-rollups");
+  if(!rollupNode&&$("#alerts")){
+    const article=document.createElement("article");article.className="card";
+    article.innerHTML='<h2>历史异常汇总</h2><p class="section-help">对应任务已经归档的陈旧未解决异常会按月、代码和 Profile 汇总，保留数量、时间范围和哈希，而不是无限保存逐条大记录。</p><div id="alert-rollups"></div>';
+    $("#alerts").appendChild(article);rollupNode=$("#alert-rollups");
+  }
   if(rollupNode)rollupNode.innerHTML=table(["月份","级别 / 代码","Profile","数量","时间范围 / 样例"],(d.alert_rollups||[]).map(x=>`<tr><td>${esc(x.bucket_start)}</td><td>${badge(x.severity,statusKind(x.severity))}<br><span class="mono">${esc(x.code)}</span></td><td class="mono">${esc(x.profile_id||"全局")}</td><td>${fmt(x.alert_count)}</td><td>${esc(x.first_at)} → ${esc(x.last_at)}<br>${esc(x.sample_message||"")}</td></tr>`));
 };
 if(dashboard)render();
