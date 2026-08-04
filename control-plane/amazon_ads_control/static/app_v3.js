@@ -7,22 +7,27 @@ function ensureApprovalTab(){
   }
   if(!$("#approvals")){
     const section=document.createElement("section");section.id="approvals";section.className="tab";
-    section.innerHTML='<p class="tab-help">高风险结构操作只有在您批准精确 Payload Hash 后才会由 Executor 执行。普通聊天回复不会授权。</p><article class="card"><h2>待审批与历史计划</h2><p class="section-help">请核对 Profile、动作、预算上限、工具、Hash 和过期时间。批准后每个决策只可消费一次，参数变化会自动失效。</p><div id="approval-list"></div></article>';
+    section.innerHTML='<p class="tab-help">高风险结构操作只有在您批准精确 Payload Hash 后才会由 Executor 执行。普通聊天回复不会授权。</p><article class="card"><h2>待审批与历史计划</h2><p class="section-help">请逐项核对 Profile、完整参数、预期状态、依赖、预算暴露、Hash 和过期时间。批准后每个决策只可消费一次，任何参数变化都会自动失效。</p><div id="approval-list"></div></article>';
     $("#app")?.appendChild(section);
   }
+}
+function prettyJson(value){try{return esc(JSON.stringify(value??{},null,2))}catch(_){return esc(String(value??""))}}
+function approvalActionDetails(action,index){
+  const dependencies=(action.depends_on||[]).map(esc).join(", ")||"无";
+  return `<details class="approval-action"><summary>${index+1}. ${esc(action.action_type)} · ${esc(action.entity_type)} · ${esc(action.entity_id)} · ${esc(action.tool_name)}</summary><p>Plan Key：<span class="mono">${esc(action.plan_key||"")}</span><br>依赖：<span class="mono">${dependencies}</span><br>单项预算暴露：${fmt(action.maximum_daily_budget)}</p><h4>批准参数</h4><pre>${prettyJson(action.arguments)}</pre><h4>独立验证预期</h4><pre>${prettyJson(action.expected_state)}</pre></details>`;
 }
 function approvalRows(items){return (items||[]).map(x=>{
   const plan=x.plan||{}, actions=plan.actions||[], hash=String(x.payload_hash||"");
   const tools=(x.tool_names||[]).join(", ");
-  const details=actions.map(a=>`${esc(a.action_type)} · ${esc(a.entity_type)} · ${esc(a.entity_id)} · ${esc(a.tool_name)}`).join("<br>");
+  const details=actions.map(approvalActionDetails).join("");
   let controls="";
   if(x.status==="pending")controls=`<button class="approve-plan" data-id="${esc(x.id)}" data-hash="${esc(hash)}">批准</button> <button class="reject-plan ghost" data-id="${esc(x.id)}">拒绝</button>`;
-  return `<tr><td>${badge(x.status,statusKind(x.status))}<br><span class="mono">${esc(x.id)}</span></td><td><strong>${esc(x.summary)}</strong><br>Profile <span class="mono">${esc(x.profile_id)}</span><br>${details||"—"}</td><td>${fmt(actions.length)} 个动作<br>${tools?`<span class="mono">${esc(tools)}</span>`:"—"}<br>预算上限 ${fmt(x.maximum_daily_budget)}</td><td><span class="mono">${esc(hash)}</span><br>到期 ${esc(x.expires_at)}</td><td>${controls}</td></tr>`;
+  return `<tr><td>${badge(x.status,statusKind(x.status))}<br><span class="mono">${esc(x.id)}</span></td><td><strong>${esc(x.summary)}</strong><br>Profile <span class="mono">${esc(x.profile_id)}</span><br>${details||"—"}</td><td>${fmt(actions.length)} 个原子动作<br>${tools?`<span class="mono">${esc(tools)}</span>`:"—"}<br>计划日预算暴露上限 ${fmt(x.maximum_daily_budget)}</td><td><span class="mono">${esc(hash)}</span><br>请求 ${esc(x.requested_at)}<br>到期 ${esc(x.expires_at)}</td><td>${controls}</td></tr>`;
 })}
 function bindApprovalActions(){
   $$('.approve-plan').forEach(button=>button.onclick=()=>mutate(button,async()=>{
     const id=button.dataset.id, hash=button.dataset.hash, phrase=`APPROVE ${id} ${hash.slice(0,12)}`;
-    const typed=window.prompt(`确认批准精确计划。请输入：\n${phrase}`)||"";
+    const typed=window.prompt(`确认您已核对全部工具、参数、依赖、预期状态和预算暴露。请输入：\n${phrase}`)||"";
     if(typed!==phrase)throw new Error("确认文本不匹配，未批准");
     await api(`/api/approvals/${encodeURIComponent(id)}/approve`,{method:"POST",body:JSON.stringify({payload_hash:hash,confirmation:typed})});
     await refresh();
@@ -50,9 +55,9 @@ render=function(){
   const approvals=d.approvals||{}, pendingApprovals=Number(approvals.pending||0);
   let approvalPill=$("#approval-pill");
   if(!approvalPill){approvalPill=document.createElement("span");approvalPill.id="approval-pill";document.querySelector(".status-strip")?.appendChild(approvalPill)}
-  approvalPill.className=pendingApprovals?"warn":"good";approvalPill.textContent=`审批 ${pendingApprovals} 待处理`;
+  approvalPill.className=pendingApprovals?"warn":"good";approvalPill.textContent=`审批 ${pendingApprovals} 待处理 / ${Number(approvals.in_flight||0)} 执行中`;
   const approvalNode=$("#approval-list");
-  if(approvalNode){approvalNode.innerHTML=table(["状态 / ID","计划","范围 / 暴露","Payload Hash / 到期","操作"],approvalRows(approvals.recent||[]));bindApprovalActions()}
+  if(approvalNode){approvalNode.innerHTML=table(["状态 / ID","完整计划","范围 / 暴露","Payload Hash / 时效","操作"],approvalRows(approvals.recent||[]));bindApprovalActions()}
 
   const storage=d.storage||{}, files=storage.files||{}, filesystem=storage.filesystem||{};
   const maintenance=storage.latest_maintenance||{}, pressure=maintenance.pressure||"normal";
