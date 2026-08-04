@@ -78,6 +78,29 @@ def main() -> int:
         }, "browser-e2e-seed")
         approval_hash = managed["approval"]["payload_hash"]
 
+        report_spec = {
+            "profile_id": "profile-browser",
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-02",
+            "timezone": "UTC",
+            "ad_product": "SPONSORED_PRODUCTS",
+        }
+        succeeded = store.create_report_job(
+            {**report_spec, "report_type": "browser-success"}, "browser-e2e-seed"
+        )
+        store.transition_report(
+            succeeded["id"], "SUBMITTED", {"report_id": "REPORT-SUCCESS"}, "browser-e2e-seed"
+        )
+        store.transition_report(
+            succeeded["id"], "SUCCEEDED", {"report_id": "REPORT-SUCCESS"}, "browser-e2e-seed"
+        )
+        failed = store.create_report_job(
+            {**report_spec, "report_type": "browser-failed"}, "browser-e2e-seed"
+        )
+        store.transition_report(
+            failed["id"], "FAILED", {"error": "fixture failure"}, "browser-e2e-seed"
+        )
+
         server = build_server(settings)
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         base = f"http://127.0.0.1:{server.server_address[1]}"
@@ -103,6 +126,11 @@ def main() -> int:
                 assert page.get_by_text("本页怎么理解").is_visible()
                 assert page.get_by_text("Main 主控").first.is_visible()
                 assert page.locator("#mode-help").inner_text().startswith("仅观察")
+
+                succeeded_row = page.locator("#reports tr").filter(has_text="browser-success")
+                failed_row = page.locator("#reports tr").filter(has_text="browser-failed")
+                assert "good" in (succeeded_row.locator(".badge").get_attribute("class") or "")
+                assert "bad" in (failed_row.locator(".badge").get_attribute("class") or "")
 
                 page.get_by_role("button", name="审批", exact=True).click()
                 page.locator("#approvals.tab.active").wait_for()
