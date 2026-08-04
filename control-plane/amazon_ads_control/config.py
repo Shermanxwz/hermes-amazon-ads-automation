@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import hmac
 import os
 from urllib.parse import urlparse
 
@@ -39,6 +40,7 @@ class Settings:
     public_origin: str
     control_password_hash: str
     agent_token: str
+    operator_token: str
     session_ttl_seconds: int
     max_sessions: int
     retention_days: int
@@ -76,6 +78,7 @@ class Settings:
             public_origin=public_origin,
             control_password_hash=os.getenv("ADS_CONTROL_PASSWORD_HASH", ""),
             agent_token=os.getenv("ADS_CONTROL_AGENT_TOKEN", ""),
+            operator_token=os.getenv("ADS_CONTROL_OPERATOR_TOKEN", ""),
             session_ttl_seconds=_int("ADS_CONTROL_SESSION_TTL", 43200, 300, 604800),
             max_sessions=_int("ADS_CONTROL_MAX_SESSIONS", 8, 1, 64),
             retention_days=_int("ADS_CONTROL_RETENTION_DAYS", 180, 7, 3650),
@@ -93,6 +96,10 @@ class Settings:
     def validate_runtime(self) -> None:
         if len(self.agent_token) < 32 or self.agent_token.strip() != self.agent_token:
             raise ValueError("ADS_CONTROL_AGENT_TOKEN must be at least 32 non-whitespace-delimited characters")
+        if len(self.operator_token) < 32 or self.operator_token.strip() != self.operator_token:
+            raise ValueError("ADS_CONTROL_OPERATOR_TOKEN must be at least 32 non-whitespace-delimited characters")
+        if hmac.compare_digest(self.agent_token, self.operator_token):
+            raise ValueError("ADS_CONTROL_OPERATOR_TOKEN must differ from ADS_CONTROL_AGENT_TOKEN")
         parts = self.control_password_hash.split("$")
         if len(parts) != 4 or parts[0] != "pbkdf2_sha256" or not parts[1].isdigit():
             raise ValueError(
