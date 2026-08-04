@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from amazon_ads_control.verification_hardening import select_entity_scope
+from amazon_ads_control.verification_hardening import (
+    scoped_expected_differences,
+    select_entity_scope,
+)
 from helpers import Environment, READ_TARGET, WRITE_TARGET
 
 
@@ -132,6 +135,64 @@ class EntityScopedVerificationTests(unittest.TestCase):
             "target",
         )
         self.assertEqual(entity["bid"], 0.61)
+
+    def test_direct_entity_field_wins_over_nested_same_name(self):
+        differences = scoped_expected_differences(
+            {"bid": 0.8},
+            {"targetId": "t1", "bid": 0.7, "recommendation": {"bid": 0.8}},
+        )
+        self.assertEqual(differences["bid"]["actual"], 0.7)
+        self.assertEqual(differences["bid"]["path"], "$.bid")
+
+    def test_multiple_nested_field_candidates_are_ambiguous(self):
+        differences = scoped_expected_differences(
+            {"bid": 0.8},
+            {
+                "targetId": "t1",
+                "current": {"bid": 0.7},
+                "recommendation": {"bid": 0.8},
+            },
+        )
+        self.assertEqual(differences["bid"]["actual"], "[ambiguous]")
+        self.assertEqual(len(differences["bid"]["paths"]), 2)
+
+    def test_one_nested_field_is_accepted_when_direct_field_is_absent(self):
+        differences = scoped_expected_differences(
+            {"bid": 0.8},
+            {"targetId": "t1", "current": {"bid": 0.8}},
+        )
+        self.assertEqual(differences, {})
+
+    def test_nested_expected_object_is_compared_recursively(self):
+        differences = scoped_expected_differences(
+            {"settings": {"state": "ENABLED", "bid": 0.8}},
+            {"settings": {"state": "ENABLED", "bid": 0.7}},
+        )
+        nested = differences["settings"]["differences"]
+        self.assertEqual(nested["bid"]["actual"], 0.7)
+        self.assertNotIn("state", nested)
+
+    def test_invalid_or_missing_expected_field_fails_closed(self):
+        differences = scoped_expected_differences(
+            {"": 1, "budget": 10},
+            {"targetId": "t1"},
+        )
+        self.assertEqual(differences[""]["actual"], "[invalid field]")
+        self.assertEqual(differences["budget"]["actual"], "[missing]")
+
+    def test_structured_values_require_exact_equality(self):
+        self.assertEqual(
+            scoped_expected_differences(
+                {"rules": [{"type": "A", "value": 1}]},
+                {"rules": [{"type": "A", "value": 1}]},
+            ),
+            {},
+        )
+        differences = scoped_expected_differences(
+            {"rules": [{"type": "A", "value": 1}]},
+            {"rules": [{"type": "A", "value": 2}]},
+        )
+        self.assertIn("rules", differences)
 
 
 if __name__ == "__main__":
