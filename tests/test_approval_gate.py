@@ -14,6 +14,7 @@ UTC = timezone.utc
 CREATE_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_create_campaign",
     "native_name": "campaign_management-create_campaign",
+    "source": "hermes-registry:na",
     "schema": {
         "name": "create campaign",
         "description": "Create one Sponsored Products campaign",
@@ -44,6 +45,7 @@ CREATE_CAMPAIGN = {
 ACCOUNT_WRITE = {
     "registered_name": "mcp_amazon_ads_account_management_update_advertiser_account",
     "native_name": "account_management-update_advertiser_account",
+    "source": "hermes-registry:na",
     "schema": {
         "description": "Update advertiser account",
         "parameters": {"type": "object", "properties": {"name": {"type": "string"}}},
