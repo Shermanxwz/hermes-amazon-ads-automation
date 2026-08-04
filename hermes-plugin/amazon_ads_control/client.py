@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 
 BASE_URL = os.getenv("ADS_CONTROL_URL", "http://127.0.0.1:8790").rstrip("/")
 TOKEN = os.getenv("ADS_CONTROL_AGENT_TOKEN", "")
+OPERATOR_TOKEN = os.getenv("ADS_CONTROL_OPERATOR_TOKEN", "")
 
 
 def _decode(raw):
@@ -20,13 +21,14 @@ def _decode(raw):
     }
 
 
-def request(method, path, payload=None, timeout=4):
+def _request(method, path, payload, timeout, headers):
     body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode()
     req = Request(
         BASE_URL + path, data=body, method=method,
         headers={
-            "Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json",
-            "User-Agent": "hermes-amazon-ads-plugin/2.1",
+            **headers,
+            "Content-Type": "application/json",
+            "User-Agent": "hermes-amazon-ads-plugin/3.2",
         },
     )
     try:
@@ -40,6 +42,22 @@ def request(method, path, payload=None, timeout=4):
         return data
     except (URLError, TimeoutError, OSError) as exc:
         return {"error": "control_plane_unavailable", "detail": str(exc)}
+
+
+def request(method, path, payload=None, timeout=4):
+    return _request(
+        method, path, payload, timeout,
+        {"Authorization": f"Bearer {TOKEN}"},
+    )
+
+
+def operator_request(method, path, payload=None, timeout=10):
+    if not OPERATOR_TOKEN:
+        return {"error": "operator_token_unavailable"}
+    return _request(
+        method, path, payload, timeout,
+        {"X-Operator-Token": OPERATOR_TOKEN},
+    )
 
 
 def context(session_id):
