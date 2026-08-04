@@ -35,6 +35,7 @@ def install() -> None:
     if _INSTALLED:
         return
     original_quality = OptimizationEngine._quality
+    original_plan = OptimizationEngine.plan
 
     def quality(self, snapshot, policy):
         result = original_quality(self, snapshot, policy)
@@ -79,6 +80,25 @@ def install() -> None:
         result["auto_write_ad_products"] = sorted(allowed_products)
         return result
 
+    def plan(self, snapshot, policy):
+        result = original_plan(self, snapshot, policy)
+        for decision in result.decisions:
+            if decision.action_type != "harvest_exact_keyword":
+                continue
+            decision.reason = (
+                "搜索词已有成熟订单且 ACOS 达标，创建并独立验证精准词；"
+                "来源流量保持不变，系统不会在缺少独立依赖事务时自动否定来源"
+            )
+            migration = decision.payload.setdefault("migration", {})
+            migration.clear()
+            migration.update({
+                "phase": "create_and_verify",
+                "source_negative_automatic": False,
+                "source_traffic_preserved": True,
+                "follow_up_requires_distinct_verified_decision": True,
+            })
+        return result
+
     def identity(row: dict[str, Any]) -> str:
         text = row.get("keyword_text") or row.get("targeting_text") or row.get("expression") or row.get("asin") or ""
         match = str(row.get("match_type") or row.get("matchType") or "").upper()
@@ -90,5 +110,6 @@ def install() -> None:
         return f"{product}:{scope}:{match}:{normalized}"
 
     OptimizationEngine._quality = quality
+    OptimizationEngine.plan = plan
     OptimizationEngine._identity = staticmethod(identity)
     _INSTALLED = True
