@@ -1,8 +1,8 @@
-"""Hermes Amazon Ads deterministic control plane."""
+"""Hermes Amazon Ads deterministic closed-loop control plane."""
 
-from .result_replay import install as _install_result_replay
+from .closed_loop import install as _install_closed_loop
 
-__version__ = "2.1.0"
+__version__ = "3.0.0"
 
-_install_result_replay()
-del _install_result_replay
+_install_closed_loop()
+del _install_closed_loop
