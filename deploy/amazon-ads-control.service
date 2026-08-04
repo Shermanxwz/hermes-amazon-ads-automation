@@ -22,6 +22,11 @@ MemoryHigh=350M
 MemoryMax=550M
 CPUQuota=80%
 TasksMax=128
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+TimeoutStopSec=20
 
 [Install]
 WantedBy=multi-user.target
