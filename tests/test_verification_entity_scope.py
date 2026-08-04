@@ -91,6 +91,48 @@ class EntityScopedVerificationTests(unittest.TestCase):
                 "target",
             )
 
+    def test_empty_planned_identifier_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "no entity_id"):
+            select_entity_scope({"targetId": "t1"}, "", "target")
+
+    def test_numeric_generic_identifier_is_supported(self):
+        entity, path = select_entity_scope(
+            {"id": 42, "state": "ENABLED"},
+            "42",
+            None,
+        )
+        self.assertEqual(entity["state"], "ENABLED")
+        self.assertEqual(path, "$")
+
+    def test_generated_entity_type_alias_is_supported(self):
+        entity, path = select_entity_scope(
+            {"payload": [{"customThingId": "thing-1", "value": 3}]},
+            "thing-1",
+            "custom-thing",
+        )
+        self.assertEqual(entity["value"], 3)
+        self.assertEqual(path, "$.payload[0]")
+
+    def test_keyword_alias_can_identify_target_scope(self):
+        entity, path = select_entity_scope(
+            {"response": {"items": [{"keywordId": "kw-7", "bid": 0.55}]}},
+            "kw-7",
+            "target",
+        )
+        self.assertEqual(entity["bid"], 0.55)
+        self.assertEqual(path, "$.response.items[0]")
+
+    def test_non_container_values_are_ignored_during_recursive_search(self):
+        entity, _path = select_entity_scope(
+            {
+                "metadata": [None, True, 17, "target-8"],
+                "targets": [{"targetId": "target-8", "bid": 0.61}],
+            },
+            "target-8",
+            "target",
+        )
+        self.assertEqual(entity["bid"], 0.61)
+
 
 if __name__ == "__main__":
     unittest.main()
