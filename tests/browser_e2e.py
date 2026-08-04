@@ -29,7 +29,7 @@ def main() -> int:
         page_errors: list[str] = []
         try:
             with sync_playwright() as p:
-                launch={"headless":True,"args":["--no-sandbox"]}
+                launch={"headless":True}
                 if os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE"):
                     launch["executable_path"]=os.environ["PLAYWRIGHT_CHROMIUM_EXECUTABLE"]
                 browser = p.chromium.launch(**launch)
@@ -54,12 +54,12 @@ def main() -> int:
                 assert page.get_by_text("目标 ACOS", exact=False).first.is_visible()
 
                 page.get_by_role("button", name="自动运营").click()
-                page.wait_for_function("document.querySelector('#mode-pill').textContent.includes('AUTOPILOT')")
+                page.locator("#mode-pill").filter(has_text="AUTOPILOT").wait_for()
                 assert "Executor 可写" in page.locator("#execution-pill").inner_text()
                 assert "Executor 只执行" in page.locator("#mode-help").inner_text()
 
                 page.get_by_role("button", name="暂停", exact=True).click()
-                page.wait_for_function("document.querySelector('#mode-pill').textContent.includes('PAUSED')")
+                page.locator("#mode-pill").filter(has_text="PAUSED").wait_for()
                 assert "阻断" in page.locator("#mode-help").inner_text()
 
                 page.set_viewport_size({"width": 390, "height": 844})
@@ -67,7 +67,7 @@ def main() -> int:
                 assert page.locator("header").bounding_box()["width"] <= 390
                 assert page.locator(".controls").is_visible()
                 page.reload(wait_until="networkidle")
-                assert page.locator("#app").is_visible()
+                page.locator("#app").wait_for(state="visible")
                 page.get_by_role("button", name="退出").click()
                 page.wait_for_selector("#login:not([hidden])")
                 browser.close()
