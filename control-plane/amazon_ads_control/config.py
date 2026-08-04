@@ -40,11 +40,11 @@ class Settings:
     public_origin: str
     control_password_hash: str
     agent_token: str
-    operator_token: str
     session_ttl_seconds: int
     max_sessions: int
     retention_days: int
     allow_remote_bind: bool
+    operator_token: str = ""
     maintenance_interval_seconds: int = 21600
     payload_retention_days: int = 30
     metric_retention_days: int = 60
