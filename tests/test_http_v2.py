@@ -51,10 +51,14 @@ class HttpV2Tests(unittest.TestCase):
 
     def test_health_and_static(self):
         self.assertEqual(self.request("/health/live")[0],200)
-        with build_opener().open(self.base+"/") as r: html=r.read().decode()
+        with build_opener().open(self.base+"/") as response: html=response.read().decode()
         self.assertIn("确定性策略",html); self.assertIn("独立验证",html)
         self.assertIn("本页怎么理解",html); self.assertIn("Main 主控",html); self.assertIn("仅观察",html)
-        self.assertIn("确认新 Schema",html); self.assertIn("Verifier 必须是不同的只读子代理",html)
+        self.assertIn("报告生命周期",html); self.assertIn("写前必须重新读取并匹配原值",html)
+        self.assertIn("只在同一实体对象内核对全部预期字段",html)
+        with build_opener().open(self.base+"/static/app_v3.js") as response:
+            script=response.read().decode(); self.assertEqual(response.status,200)
+        self.assertIn("result_outbox_pending",script); self.assertIn("runtime_status",script)
 
     def test_browser_auth_csrf_and_dashboard(self):
         self.assertEqual(self.request("/api/dashboard")[0],401); self.login()
