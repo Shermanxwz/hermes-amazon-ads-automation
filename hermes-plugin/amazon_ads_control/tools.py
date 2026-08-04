@@ -19,10 +19,18 @@ def create_report_job(spec, **kwargs):
     }, timeout=20), ensure_ascii=False)
 
 
-def transition_report(report_job_id, status, data=None, **kwargs):
+def report_evidence(limit=20, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/report-evidence", {
+        "limit": limit, "session_id": _session(kwargs),
+    }, timeout=15), ensure_ascii=False)
+
+
+def transition_report(report_job_id, status, evidence_action_id=None, data=None, **kwargs):
     return json.dumps(client.request("POST", "/api/agent/reports/transition", {
         "report_job_id": report_job_id,
         "status": status,
+        "evidence_action_id": evidence_action_id,
+        "session_id": _session(kwargs),
         "data": data or {},
         "actor": "hermes-main",
     }, timeout=20), ensure_ascii=False)
