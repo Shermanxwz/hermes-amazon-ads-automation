@@ -21,9 +21,12 @@ def install() -> None:
 
     original_permanent_block = approval_gate._permanent_block
     original_guardrail = ControlService._guardrail_check
+    original_create_request = Store.create_approval_request
     original_reconcile = Store.reconcile_expired_approvals
     original_reject = Store.reject_approval
+    original_complete_decision = Store.complete_approval_decision
     original_record_verification = Store.record_verification
+    original_finalize_task = Store.finalize_task
     original_dashboard = Store.dashboard
 
     def permanent_block(tool: dict[str, Any] | None) -> str | None:
@@ -65,6 +68,40 @@ def install() -> None:
             if dependency.get("status") not in {"executed", "verified"}:
                 return False, f"approved dependency {reference} has no confirmed successful execution"
         return original_guardrail(self, decision, tool, settings)
+
+    def create_approval_request(
+        self,
+        task_id: str,
+        actor: str,
+        summary: str = "",
+        ttl_minutes: int | None = None,
+    ) -> dict[str, Any]:
+        task = self.get_task(task_id)
+        if not task:
+            raise KeyError("task not found")
+        if task.get("status") in {"executing", "verifying", "completed", "completed_with_issues"}:
+            raise ValueError(f"task cannot request or replace approval from {task.get('status')}")
+        with self.connection() as conn:
+            active = conn.execute(
+                "SELECT id,status FROM approval_requests WHERE task_id=? "
+                "AND status IN ('approved','expired_in_flight') ORDER BY requested_at DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            consumed = int(conn.execute(
+                "SELECT COUNT(*) FROM approval_decisions ad "
+                "JOIN approval_requests ar ON ar.id=ad.approval_id "
+                "WHERE ar.task_id=? AND ad.status IN ('reserved','completed','issue')",
+                (task_id,),
+            ).fetchone()[0])
+        if consumed:
+            raise ValueError(
+                "a started or completed approval plan cannot be superseded; pause and reconcile the task"
+            )
+        if active:
+            raise ValueError(
+                f"approval {active['id']} is already {active['status']}; explicitly reject it before requesting a replacement"
+            )
+        return original_create_request(self, task_id, actor, summary, ttl_minutes)
 
     def reconcile_expired_approvals(self) -> list[str]:
         expired = list(original_reconcile(self))
@@ -125,7 +162,7 @@ def install() -> None:
 
     def reject_approval(self, approval_id: str, actor: str, reason: str = ""):
         approval = self.get_approval(approval_id)
-        if approval and approval.get("status") == "approved":
+        if approval and approval.get("status") in {"approved", "expired_in_flight"}:
             with self.connection() as conn:
                 consumed = int(conn.execute(
                     "SELECT COUNT(*) FROM approval_decisions "
@@ -134,9 +171,39 @@ def install() -> None:
                 ).fetchone()[0])
             if consumed:
                 raise ValueError(
-                    "an approved plan with started or completed actions cannot be rejected; pause the controller and reconcile it"
+                    "an approval with started or completed actions cannot be rejected; pause the controller and reconcile it"
                 )
         return original_reject(self, approval_id, actor, reason)
+
+    def complete_approval_decision(self, decision_id: str) -> None:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT ar.id,ar.status FROM approval_requests ar "
+                "JOIN approval_decisions ad ON ad.approval_id=ar.id "
+                "WHERE ad.decision_id=? AND ad.status='reserved' "
+                "ORDER BY ad.reserved_at DESC LIMIT 1",
+                (decision_id,),
+            ).fetchone()
+        previous_status = str(row["status"] or "") if row else ""
+        approval_id = str(row["id"] or "") if row else ""
+        original_complete_decision(self, decision_id)
+        if previous_status not in {"expired", "expired_in_flight"} or not approval_id:
+            return
+        with self.connection() as conn:
+            current = conn.execute(
+                "SELECT status FROM approval_requests WHERE id=?", (approval_id,)
+            ).fetchone()
+            if current and current["status"] == "completed":
+                conn.execute(
+                    "UPDATE approval_requests SET status='completed_after_expiry' WHERE id=?",
+                    (approval_id,),
+                )
+                self.approval_event(
+                    approval_id,
+                    "completed_after_expiry",
+                    "controller",
+                    {"decision_id": decision_id},
+                )
 
     def record_verification(self, **kwargs):
         result = original_record_verification(self, **kwargs)
@@ -177,7 +244,7 @@ def install() -> None:
                     current_status = str(current["status"] or "") if current else ""
                     final_status = (
                         "completed_with_issues_after_expiry"
-                        if current_status in {"expired", "expired_in_flight"}
+                        if current_status in {"expired", "expired_in_flight", "completed_after_expiry"}
                         else "completed_with_issues"
                     )
                     conn.execute(
@@ -197,6 +264,58 @@ def install() -> None:
         if final_status:
             self.approval_event(approval_id, final_status, "controller")
         return result
+
+    def finalize_task(self, task_id: str, actor: str, summary: str = "") -> dict[str, Any]:
+        task = original_finalize_task(self, task_id, actor, summary)
+        now = _now()
+        with self.connection() as conn:
+            approvals = conn.execute(
+                "SELECT id,status FROM approval_requests WHERE task_id=? "
+                "AND status NOT IN ('rejected','cancelled','expired') ORDER BY requested_at DESC",
+                (task_id,),
+            ).fetchall()
+            for approval in approvals:
+                approval_id = str(approval["id"])
+                rows = conn.execute(
+                    "SELECT ad.decision_id,d.status FROM approval_decisions ad "
+                    "JOIN decisions d ON d.id=ad.decision_id WHERE ad.approval_id=?",
+                    (approval_id,),
+                ).fetchall()
+                issues = 0
+                for row in rows:
+                    status = str(row["status"] or "")
+                    if status == "verified":
+                        conn.execute(
+                            "UPDATE approval_decisions SET status='completed',completed_at=COALESCE(completed_at,?) "
+                            "WHERE approval_id=? AND decision_id=?",
+                            (now, approval_id, row["decision_id"]),
+                        )
+                    elif status in {"failed", "mismatch", "blocked"}:
+                        issues += 1
+                        conn.execute(
+                            "UPDATE approval_decisions SET status='issue',completed_at=COALESCE(completed_at,?) "
+                            "WHERE approval_id=? AND decision_id=?",
+                            (now, approval_id, row["decision_id"]),
+                        )
+                previous = str(approval["status"] or "")
+                after_expiry = previous in {"expired_in_flight", "completed_after_expiry"}
+                final_status = (
+                    "completed_with_issues_after_expiry" if issues and after_expiry
+                    else "completed_after_expiry" if after_expiry
+                    else "completed_with_issues" if issues
+                    else "completed"
+                )
+                conn.execute(
+                    "UPDATE approval_requests SET status=?,completed_at=COALESCE(completed_at,?) WHERE id=?",
+                    (final_status, now, approval_id),
+                )
+                self.approval_event(
+                    approval_id,
+                    final_status,
+                    actor,
+                    {"task_id": task_id, "issues": issues},
+                )
+        return task
 
     def dashboard(self):
         result = original_dashboard(self)
@@ -221,8 +340,11 @@ def install() -> None:
 
     approval_gate._permanent_block = permanent_block
     ControlService._guardrail_check = guardrail
+    Store.create_approval_request = create_approval_request
     Store.reconcile_expired_approvals = reconcile_expired_approvals
     Store.reject_approval = reject_approval
+    Store.complete_approval_decision = complete_approval_decision
     Store.record_verification = record_verification
+    Store.finalize_task = finalize_task
     Store.dashboard = dashboard
     _INSTALLED = True
