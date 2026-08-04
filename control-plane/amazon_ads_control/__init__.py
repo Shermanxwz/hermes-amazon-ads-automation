@@ -14,13 +14,16 @@ from .report_evidence_hardening import install as _install_report_evidence_harde
 from .callback_hardening import install as _install_callback_hardening
 from .task_hardening import install as _install_task_hardening
 from .storage_maintenance import install as _install_storage_maintenance
+from .storage_alert_rollup import install as _install_storage_alert_rollup
 from .api_extension import install as _install_api_extension
 _install_report_evidence_hardening()
 _install_callback_hardening()
 _install_task_hardening()
 _install_storage_maintenance()
+_install_storage_alert_rollup()
 _install_api_extension()
 
 del _install_closed_loop, _install_closed_loop_fixes, _install_strategy_hardening
 del _install_report_evidence_hardening, _install_callback_hardening
-del _install_task_hardening, _install_storage_maintenance, _install_api_extension
+del _install_task_hardening, _install_storage_maintenance, _install_storage_alert_rollup
+del _install_api_extension
