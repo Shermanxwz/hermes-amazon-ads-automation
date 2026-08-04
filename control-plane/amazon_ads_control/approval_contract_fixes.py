@@ -9,6 +9,7 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    from . import approval_gate
     from . import db as db_module
     from .db import Store
 
@@ -18,6 +19,47 @@ def install() -> None:
     # global switch or misread it as an approval bypass.
     db_module.SAFETY_LOCKED_SETTINGS["block_deletes"] = False
     db_module.DEFAULT_SETTINGS["block_deletes"] = False
+
+    def decision_plan(decision: dict[str, Any]) -> dict[str, Any]:
+        payload = decision.get("payload") if isinstance(decision.get("payload"), dict) else {}
+        arguments = payload.get("approved_args") if isinstance(payload.get("approved_args"), dict) else {}
+        expected_state = payload.get("expected_state") if isinstance(payload.get("expected_state"), dict) else {}
+        depends_on = payload.get("depends_on") if isinstance(payload.get("depends_on"), list) else []
+        return {
+            "decision_id": str(decision.get("id") or ""),
+            "plan_key": str(decision.get("plan_key") or ""),
+            "action_type": str(decision.get("action_type") or ""),
+            "entity_type": str(decision.get("entity_type") or ""),
+            "entity_id": str(decision.get("entity_id") or ""),
+            "expected_family": str(decision.get("expected_family") or ""),
+            "risk": str(decision.get("risk") or "critical"),
+            "tool_name": str(payload.get("tool_name") or ""),
+            # The operator must see and approve the canonical exact arguments,
+            # not only their digest. The digest remains for independent runtime
+            # comparison, while the full arguments are part of the plan Hash.
+            "arguments": arguments,
+            "arguments_hash": str(payload.get("approved_args_hash") or ""),
+            "expected_state": expected_state,
+            "depends_on": [str(item) for item in depends_on],
+            "maximum_daily_budget": payload.get("maximum_daily_budget"),
+        }
+
+    def approval_plan(task: dict[str, Any], decisions: list[dict[str, Any]]) -> dict[str, Any]:
+        rows = sorted((decision_plan(item) for item in decisions), key=lambda row: row["decision_id"])
+        return {
+            "version": 2,
+            "task_id": str(task.get("id") or ""),
+            "cycle_id": str(task.get("cycle_id") or ""),
+            "profile_id": str(decisions[0].get("profile_id") if decisions else ""),
+            "title": str(task.get("title") or ""),
+            "actions": rows,
+        }
+
+    # Store.create_approval_request resolves this module global at call time, so
+    # installing the v2 plan compiler upgrades every subsequent approval without
+    # rewriting or weakening the underlying reservation/verification flow.
+    approval_gate._decision_plan = decision_plan
+    approval_gate._approval_plan = approval_plan
 
     original_get_approval = Store.get_approval
     original_create_approval_request = Store.create_approval_request
