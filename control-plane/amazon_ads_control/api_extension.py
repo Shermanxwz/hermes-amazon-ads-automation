@@ -52,6 +52,7 @@ def install() -> None:
         routes = {
             "/api/agent/reports": "create_report",
             "/api/agent/reports/transition": "transition_report",
+            "/api/agent/report-evidence": "report_evidence",
             "/api/agent/prepare-write": "prepare_write",
             "/api/agent/runtime-status": "runtime_status",
         }
