@@ -70,7 +70,7 @@ class PluginV3Tests(unittest.TestCase):
 
     def test_register_contract(self):
         ctx=FakeCtx(); self.plugin.register(ctx)
-        self.assertEqual(len(ctx.tools),12); self.assertIn("ads_control_create_report_job",ctx.tools); self.assertIn("ads_control_prepare_write",ctx.tools); self.assertIn("pre_tool_call",ctx.hooks); self.assertEqual(ctx.skills["amazon-ads-autopilot"].name,"SKILL.md")
+        self.assertEqual(len(ctx.tools),13); self.assertIn("ads_control_create_report_job",ctx.tools); self.assertIn("ads_control_report_evidence",ctx.tools); self.assertIn("ads_control_prepare_write",ctx.tools); self.assertIn("pre_tool_call",ctx.hooks); self.assertEqual(ctx.skills["amazon-ads-autopilot"].name,"SKILL.md")
         with self.assertRaises(ValueError): ctx.tools["ads_control_status"]("bad")
 
     def test_pre_llm_context_and_unavailable_message(self):
@@ -89,13 +89,14 @@ class PluginV3Tests(unittest.TestCase):
         calls=[]
         def request(method,path,payload=None,timeout=4): calls.append((method,path,payload,timeout)); return {"ok":True}
         with patch.object(self.plugin.client,"request",side_effect=request), patch.object(self.plugin.client,"context",return_value={"role":"main"}):
-            self.plugin.tools.create_report_job({"profile_id":"p"}); self.plugin.tools.transition_report("job","SUBMITTED",{"report_id":"r"})
+            self.plugin.tools.create_report_job({"profile_id":"p"}); self.plugin.tools.report_evidence(10,session_id="s"); self.plugin.tools.transition_report("job","SUBMITTED",11,{"report_id":"r"},session_id="s")
             self.assertIn('"ok": true',self.plugin.tools.plan_cycle({"profile":{}},{"report_job_ids":["j"]},{"target_acos":30},session_id="s"))
             self.plugin.tools.create_task("cycle",7,turn_id="turn"); self.assertIn("main",self.plugin.tools.status(session_id="s")); self.plugin.tools.record_note("note",task_id="task",session_id="s")
             self.plugin.tools.prepare_write("d",11,session_id="e"); self.plugin.tools.read_evidence("d",5,session_id="v"); self.plugin.tools.verify_decision("d",12,"ok",session_id="v"); self.plugin.tools.finalize_task("task","done",session_id="s"); self.plugin.tools.ingest_stream_events([{"id":1}],session_id="s")
         paths=[item[1] for item in calls]
-        self.assertEqual(paths,["/api/agent/reports","/api/agent/reports/transition","/api/agent/cycles/plan","/api/agent/tasks","/api/agent/events","/api/agent/prepare-write","/api/agent/read-evidence","/api/agent/verify","/api/agent/task-finalize","/api/agent/stream-events"])
-        self.assertEqual(calls[2][2]["parent_session_id"],"s"); self.assertEqual(calls[3][2]["parent_session_id"],"turn")
+        self.assertEqual(paths,["/api/agent/reports","/api/agent/report-evidence","/api/agent/reports/transition","/api/agent/cycles/plan","/api/agent/tasks","/api/agent/events","/api/agent/prepare-write","/api/agent/read-evidence","/api/agent/verify","/api/agent/task-finalize","/api/agent/stream-events"])
+        self.assertEqual(calls[2][2]["evidence_action_id"],11); self.assertEqual(calls[2][2]["session_id"],"s")
+        self.assertEqual(calls[3][2]["parent_session_id"],"s"); self.assertEqual(calls[4][2]["parent_session_id"],"turn")
 
 
 class PluginClientTests(unittest.TestCase):
