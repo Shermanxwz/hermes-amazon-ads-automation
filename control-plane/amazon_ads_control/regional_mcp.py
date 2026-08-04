@@ -110,12 +110,15 @@ def _tool_call_region_guard(store, tool: dict[str, Any], args: dict[str, Any], s
     if not expected:
         semantic = str(tool.get("semantic") or "unknown")
         family = str(tool.get("family") or "")
-        # Account/Profile discovery is the only regional call allowed before a
-        # concrete Profile exists locally. All stateful jobs/writes and scoped
-        # entity reads must carry a known Profile or a bound task.
         if semantic == "read" and family in {"profile", "account_admin"}:
             return True, f"regional {actual} account/Profile discovery"
-        return False, "regional Amazon MCP call requires a known Profile ID or a Profile-bound task"
+        # A cataloged read or reporting job may legitimately define its scope
+        # without a Profile ID in the top-level arguments. The regional toolset
+        # is still explicit, so it cannot cross to another endpoint. Stateful
+        # writes never receive this exception.
+        if semantic in {"read", "job"}:
+            return True, f"regional {actual} unscoped {semantic} operation"
+        return False, "regional Amazon MCP write requires a Profile-bound task"
     expected_region = next(iter(expected))
     if expected_region != actual:
         return False, f"Profile requires Amazon Ads MCP region {expected_region}, but tool belongs to {actual}"
@@ -181,53 +184,67 @@ def install() -> None:
             result["drifted"] = sorted(set(result.get("drifted") or []) | set(source_drift))
         return result
 
+    def _blocked_region_result(self, payload, tool, reason):
+        tool_name = str(payload.get("tool_name") or "")
+        args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        session_id = str(payload.get("session_id") or payload.get("task_id") or "") or None
+        worker = self.store.worker_for_session(session_id)
+        actor_role = worker.get("role") if worker else "main"
+        task_id = worker.get("task_id") if worker else None
+        action_id = self.store.record_action(
+            decision_id=None,
+            task_id=str(task_id) if task_id else None,
+            session_id=session_id,
+            tool_call_id=str(payload.get("tool_call_id") or "") or None,
+            actor_role=str(actor_role),
+            phase="before",
+            tool_name=tool_name,
+            operation=str(tool.get("semantic") or "unknown"),
+            allowed=False,
+            args=redact(args),
+            reason=reason,
+        )
+        self.store.event(
+            "warning",
+            "tool.region_blocked",
+            str(actor_role),
+            str(task_id) if task_id else None,
+            f"Blocked {tool_name}: {reason}",
+            {"action_id": action_id, "tool_region": tool_region(tool)},
+        )
+        return {
+            "allowed": False,
+            "reason": reason,
+            "operation": str(tool.get("semantic") or "unknown"),
+            "actor_role": actor_role,
+            "task_id": task_id,
+            "action_id": action_id,
+            "decision_id": None,
+            "plan_key": None,
+            "reservation_token": None,
+            "tool": {
+                key: tool.get(key)
+                for key in ("native_name", "family", "risk", "schema_hash", "source")
+            },
+        }
+
     def authorize_tool(self, payload: dict[str, Any]):
         tool_name = str(payload.get("tool_name") or "")
         tool = self.store.get_tool(tool_name)
+        if not tool:
+            return original_authorize(self, payload)
+
+        # Write authorization must preserve the base policy's role, schema,
+        # mode and profile-disabled precedence. Its final guardrail wrapper
+        # performs the regional check before any reservation can be created.
+        if str(tool.get("semantic") or "unknown") == "write":
+            return original_authorize(self, payload)
+
         args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
         session_id = str(payload.get("session_id") or payload.get("task_id") or "") or None
-        if tool:
-            allowed, reason = _tool_call_region_guard(self.store, tool, args, session_id)
-            if not allowed:
-                worker = self.store.worker_for_session(session_id)
-                actor_role = worker.get("role") if worker else "main"
-                task_id = worker.get("task_id") if worker else None
-                action_id = self.store.record_action(
-                    decision_id=None,
-                    task_id=str(task_id) if task_id else None,
-                    session_id=session_id,
-                    tool_call_id=str(payload.get("tool_call_id") or "") or None,
-                    actor_role=str(actor_role),
-                    phase="before",
-                    tool_name=tool_name,
-                    operation=str(tool.get("semantic") or "unknown"),
-                    allowed=False,
-                    args=redact(args),
-                    reason=reason,
-                )
-                self.store.event(
-                    "warning",
-                    "tool.region_blocked",
-                    str(actor_role),
-                    str(task_id) if task_id else None,
-                    f"Blocked {tool_name}: {reason}",
-                    {"action_id": action_id, "tool_region": tool_region(tool)},
-                )
-                return {
-                    "allowed": False,
-                    "reason": reason,
-                    "operation": str(tool.get("semantic") or "unknown"),
-                    "actor_role": actor_role,
-                    "task_id": task_id,
-                    "action_id": action_id,
-                    "decision_id": None,
-                    "plan_key": None,
-                    "reservation_token": None,
-                    "tool": {
-                        key: tool.get(key)
-                        for key in ("native_name", "family", "risk", "schema_hash", "source")
-                    },
-                }
+        allowed, reason = _tool_call_region_guard(self.store, tool, args, session_id)
+        if not allowed:
+            return _blocked_region_result(self, payload, tool, reason)
         return original_authorize(self, payload)
 
     def guardrail(self, decision, tool, settings):
