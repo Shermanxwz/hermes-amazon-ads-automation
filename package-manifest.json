@@ -5,9 +5,9 @@
   "runtime": {
     "control_plane": "Python 3.11+ standard library",
     "database": "SQLite WAL with periodic checkpoint, adaptive retention and safe reclaim",
-    "hermes_contract": "hermes-agent 0.18.2+ with feature-detected commands and lifecycle hooks",
+    "hermes_contract": "hermes-agent 0.18.2+ with real tool, hook, command, skill and delegation contracts",
     "amazon_capability": "official Amazon Ads MCP plus public Advanced Tools contracts",
-    "web": "responsive operations and payload-bound approval dashboard",
+    "web": "authenticated responsive operations and exact payload-bound approval dashboard",
     "target_host": "2C2G Linux VPS"
   },
   "capabilities": [
@@ -15,10 +15,13 @@
     "deterministic sponsored-ads strategy engine",
     "payload-bound and expiring operator approval for high-risk structural plans",
     "campaign, ad-group, target, keyword, ad and portfolio plan execution after exact approval",
-    "permanently blocked billing, account administration, unknown, drifted and irreversible delete operations",
-    "separate machine and human approval credentials",
-    "Hermes CLI and gateway approval commands when supported",
+    "deterministic binding of real Amazon IDs into pre-approved dependent action templates",
+    "permanently blocked billing, account administration, unknown, drifted, irreversible delete and black-box composite/bulk operations",
+    "separate machine and optional restricted-command human approval credentials",
+    "authenticated Web approval as the default human authority",
+    "Hermes approval commands registered but mutation-disabled by default",
     "Hermes session lifecycle, LLM, tool and subagent hook integration",
+    "automatic OBSERVE downgrade when Hermes reports a model fallback",
     "atomic executor reservations and cross-cycle cooldown",
     "independent read-only verifier in a different Hermes session",
     "structured partial, pending and failure outcome handling",
@@ -39,7 +42,8 @@
     "owner AWS Marketing Stream delivery",
     "historical replay plus sustained OBSERVE shadow review",
     "Amazon Ads Test Account or controlled real-account campaign-create canary with independent verifier readback",
-    "Hermes approval command and Web approval checks on every deployed interaction surface",
+    "authenticated Web approval on the deployed HTTPS origin",
+    "Hermes command listing on every deployed interaction surface and restricted-command approval only where intentionally enabled",
     "actual VPS HTTPS, reboot, storage soak and backup-restore drill"
   ]
 }
