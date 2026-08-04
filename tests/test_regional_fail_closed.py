@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 from amazon_ads_control.catalog import descriptor_from_payload
+from amazon_ads_control.catalog_region_hardening import install as install_catalog_region_hardening
 from amazon_ads_control.db import Store
 from amazon_ads_control.service import ControlService
 
@@ -48,13 +49,34 @@ class RegionalFailClosedTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_catalog_hardening_install_is_idempotent(self):
+        original = ControlService.sync_catalog
+        install_catalog_region_hardening()
+        self.assertIs(ControlService.sync_catalog, original)
+
+    def test_service_catalog_sync_requires_non_empty_tool_array(self):
+        for payload in ({}, {"tools": []}, {"tools": "not-a-list"}):
+            with self.subTest(payload=payload):
+                with self.assertRaisesRegex(ValueError, "non-empty array"):
+                    self.service.sync_catalog(payload)
+
+    def test_service_catalog_sync_rejects_non_object_tool(self):
+        with self.assertRaisesRegex(ValueError, "must be an object"):
+            self.service.sync_catalog({"tools": ["not-an-object"]})
+
+    def test_service_catalog_sync_rejects_non_amazon_registered_name(self):
+        tool = report_tool("hermes-registry:na")
+        tool["registered_name"] = "mcp_other_reporting_create_report"
+        with self.assertRaisesRegex(ValueError, "outside mcp-amazon-ads"):
+            self.service.sync_catalog({"tools": [tool]})
+
     def test_service_catalog_sync_preserves_validated_region_source(self):
-        tool = report_tool("hermes-registry:fe")
+        tool = report_tool("  HERMES-REGISTRY:FE  ")
         self.service.sync_catalog({"tools": [tool]})
-        self.assertEqual(
-            self.store.get_tool(tool["registered_name"])["source"],
-            "hermes-registry:fe",
-        )
+        stored = self.store.get_tool(tool["registered_name"])
+        self.assertEqual(stored["source"], "hermes-registry:fe")
+        self.assertEqual(stored["semantic"], "job")
+        self.assertEqual(stored["family"], "report")
 
     def test_service_catalog_sync_rejects_untrusted_source_names(self):
         tool = report_tool("user-supplied:fe")
