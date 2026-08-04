@@ -53,8 +53,10 @@ def main() -> int:
             "on_session_start", "on_session_end", "on_session_finalize", "on_session_reset",
             "subagent_start", "subagent_stop",
         }
+        expected_commands = {"ads-approvals", "ads-approve", "ads-reject"}
         assert expected_tools.issubset(set(loaded.tools_registered)), loaded.tools_registered
         assert expected_hooks.issubset(set(loaded.hooks_registered)), loaded.hooks_registered
+        assert expected_commands.issubset(set(loaded.commands_registered)), loaded.commands_registered
         for name in expected_tools:
             assert registry.get_schema(name), f"missing schema for {name}"
             entry = registry.get_entry(name)
@@ -64,7 +66,10 @@ def main() -> int:
         text = skill.read_text(encoding="utf-8")
         assert "Approval-Gated Full Autopilot" in text
         assert "/ads-approve" in text
-        print(f"real-hermes-smoke: OK ({len(expected_tools)} tools, {len(loaded.hooks_registered)} hooks)")
+        print(
+            f"real-hermes-smoke: OK ({len(expected_tools)} tools, "
+            f"{len(loaded.hooks_registered)} hooks, {len(loaded.commands_registered)} commands)"
+        )
     return 0
 
 
