@@ -109,11 +109,9 @@ def exercise(browser_type: BrowserType, root: Path) -> None:
         fault_injection_active[0] = True
         page.route("**/api/dashboard", unavailable)
         page.get_by_role("button", name="刷新").click()
-        page.wait_for_function(
-            "document.querySelector('#notice') && "
-            "document.querySelector('#notice').textContent.includes('simulated_dashboard_unavailable')"
-        )
-        assert "simulated_dashboard_unavailable" in page.locator("#notice").inner_text()
+        notice = page.locator("#notice").filter(has_text="simulated_dashboard_unavailable")
+        notice.wait_for(state="visible")
+        assert "simulated_dashboard_unavailable" in notice.inner_text()
         page.unroute("**/api/dashboard", unavailable)
         page.wait_for_timeout(50)
         fault_injection_active[0] = False
