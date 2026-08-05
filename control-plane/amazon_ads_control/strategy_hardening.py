@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .strategy_core import PLACEMENTS
 from .strategy_gold import OptimizationEngine
 
 _INSTALLED = False
@@ -51,9 +52,10 @@ def install() -> None:
                 unsafe.add(f"missing_account_{metric}")
         allowed_products = {
             str(item).upper() for item in getattr(policy, "auto_write_ad_products", (
-                "SPONSORED_PRODUCTS", "SPONSORED_BRANDS", "SPONSORED_DISPLAY",
+                "SPONSORED_PRODUCTS",
             ))
         }
+        valid_placements = set(PLACEMENTS.values())
         rejected = result.setdefault("rejected_rows", {})
         for level, requirements in ROW_REQUIREMENTS.items():
             rows = snapshot.get(level, [])
@@ -70,6 +72,11 @@ def install() -> None:
                 product = str(row.get("ad_product") or "").upper()
                 if product and product not in allowed_products:
                     reasons.append("ad_product_observe_only")
+                if level == "placements" and row.get("placement") not in (None, ""):
+                    raw_placement = str(row.get("placement") or "").upper()
+                    canonical_placement = PLACEMENTS.get(raw_placement, raw_placement)
+                    if canonical_placement not in valid_placements:
+                        reasons.append("unsupported_placement")
                 if reasons:
                     bad[str(index)] = sorted(set(reasons))
             if bad:
