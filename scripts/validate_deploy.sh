@@ -3,9 +3,24 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-cp -a "$ROOT" "$TMP/package-src"
-rm -rf "$TMP/package-src/.venv" "$TMP/package-src/build" "$TMP/package-src/.coverage"
-find "$TMP/package-src" -type d \( -name __pycache__ -o -name '*.egg-info' \) -prune -exec rm -rf {} +
+
+prepare_source() {
+  local destination="$1"
+  cp -a "$ROOT" "$destination"
+  rm -rf \
+    "$destination/.git" \
+    "$destination/.ci-hermes-agent" \
+    "$destination/.venv" \
+    "$destination/.coverage" \
+    "$destination/.pytest_cache" \
+    "$destination/.ruff_cache" \
+    "$destination/artifacts" \
+    "$destination/build" \
+    "$destination/dist"
+  find "$destination" -type d \( -name __pycache__ -o -name '*.egg-info' \) -prune -exec rm -rf {} +
+}
+
+prepare_source "$TMP/package-src"
 cd "$TMP/package-src"
 if python3 -c 'import setuptools.build_meta' >/dev/null 2>&1; then
   python3 -m pip wheel . --no-deps --no-build-isolation -w "$TMP/dist" >/dev/null
@@ -30,10 +45,9 @@ export ADS_MCP_DEFAULT_REGION=fe
 export ADS_MCP_TOOLSETS=mcp-amazon-ads
 export ADS_CONTROL_PASSWORD_HASH="$(PYTHONPATH="$ROOT/control-plane" python3 -c 'from amazon_ads_control.security import hash_password; print(hash_password("correct horse battery staple"))')"
 "$TMP/installed/bin/amazon-ads-control" --check >/dev/null
-PYTHONPATH="$TMP/installed/lib/python3.12/site-packages" python3 "$ROOT/scripts/control_cli.py" storage-status --database "$TMP/state.db" >/dev/null
-cp -a "$ROOT" "$TMP/source"
-rm -rf "$TMP/source/.venv" "$TMP/source/build" "$TMP/source/.coverage"
-find "$TMP/source" -type d \( -name __pycache__ -o -name '*.egg-info' \) -prune -exec rm -rf {} +
+INSTALLED_SITE="$("$TMP/installed/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
+PYTHONPATH="$INSTALLED_SITE" python3 "$ROOT/scripts/control_cli.py" storage-status --database "$TMP/state.db" >/dev/null
+prepare_source "$TMP/source"
 HERMES_HOME="$TMP/hermes" bash "$TMP/source/scripts/install.sh" >/dev/null
 [[ -L "$TMP/hermes/plugins/amazon-ads-control" ]]
 grep -q '^ADS_CONTROL_OPERATOR_TOKEN=$' deploy/control.env.example
