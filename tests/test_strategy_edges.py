@@ -59,6 +59,27 @@ class StrategyEdgeTests(unittest.TestCase):
         self.assertEqual(decisions[0].payload["before"], 0)
         self.assertGreater(decisions[0].payload["after"], 0)
 
+    def test_unknown_placement_is_rejected_before_reduction(self):
+        s = one_target_snapshot(); s["targets"] = []
+        s["placements"] = [{
+            "campaign_id": "c", "ad_product": PRODUCT, "placement": "UNKNOWN_PLACEMENT",
+            "adjustment_percent": 30, "clicks": 50, "spend": 90, "sales": 100, "orders": 4,
+        }]
+        plan = self.engine.plan(s, self.policy)
+        self.assertEqual(plan.decisions, [])
+        self.assertIn("unsupported_placement", plan.data_quality["rejected_rows"]["placements"]["0"])
+
+    def test_non_sp_product_is_observe_only_in_routine_optimizer(self):
+        s = one_target_snapshot()
+        s["targets"][0]["ad_product"] = "SPONSORED_BRANDS"
+        policy = StrategyPolicy.from_mapping({
+            "auto_write_ad_products": ["SPONSORED_PRODUCTS", "SPONSORED_BRANDS"],
+        })
+        plan = self.engine.plan(s, policy)
+        self.assertEqual(plan.decisions, [])
+        self.assertEqual(plan.data_quality["auto_write_ad_products"], ["SPONSORED_PRODUCTS"])
+        self.assertIn("ad_product_observe_only", plan.data_quality["rejected_rows"]["targets"]["0"])
+
 
 if __name__ == "__main__":
     unittest.main()
