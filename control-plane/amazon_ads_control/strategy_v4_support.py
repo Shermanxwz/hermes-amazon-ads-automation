@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 from .probabilistic_acos import DelayModel, PosteriorConfig, account_aov, estimate_acos_posterior
-from .strategy_core import Decision, _clamp, _d, _i, _q
+from .strategy_core import Decision, PLACEMENTS, _clamp, _d, _i, _q
 from .strategy_v4_policy import StrategyPolicy
 
 REDUCE = {"ADS-TARGET-WASTE", "ADS-TARGET-OVER-ACOS", "ADS-BUDGET-CONTAIN-LOSS", "ADS-PLACEMENT-REDUCE", "ADS-SEARCH-NEGATIVE"}
@@ -23,6 +23,11 @@ def context(snapshot: dict[str, Any], policy: StrategyPolicy):
     return delay, cfg, account_aov(snapshot, float(policy.posterior_default_aov))
 
 
+def _placement(value: Any) -> str:
+    raw = str(value or "").upper()
+    return PLACEMENTS.get(raw, raw)
+
+
 def row_index(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for level in ("targets", "campaigns", "search_terms", "placements"):
@@ -35,16 +40,26 @@ def row_index(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
             for key in ("target_id", "keyword_id", "campaign_id", "id", "search_term", "query"):
                 if row.get(key) not in (None, ""):
                     result[f"{level}:{row[key]}"] = row
+            if level == "placements":
+                campaign = str(row.get("campaign_id") or "")
+                placement = _placement(row.get("placement"))
+                if campaign and placement:
+                    result[f"placements:{campaign}:{placement}"] = row
     return result
 
 
 def decision_row(decision: Decision, index: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    payload = decision.payload if isinstance(decision.payload, dict) else {}
+    if decision.rule_id.startswith("ADS-PLACEMENT-"):
+        placement = _placement(payload.get("placement") or decision.evidence.get("placement"))
+        exact = index.get(f"placements:{decision.entity_id}:{placement}")
+        if exact:
+            return exact
     levels = {"target": ("targets",), "campaign": ("campaigns", "placements"), "search_term": ("search_terms",)}
     for level in levels.get(decision.entity_type, ("targets", "campaigns", "search_terms", "placements")):
         row = index.get(f"{level}:{decision.entity_id}")
         if row:
             return row
-    payload = decision.payload if isinstance(decision.payload, dict) else {}
     campaign = str(payload.get("campaign_id") or "")
     return index.get(f"campaigns:{campaign}") or index.get(f"placements:{campaign}")
 
@@ -70,14 +85,17 @@ def gate(decisions: list[Decision], snapshot: dict[str, Any], policy: StrategyPo
         item.evidence = {**item.evidence, "posterior_acos": post.as_dict(), "decision_os": "v4"}
         ok = True
         if item.rule_id in REDUCE:
-            ok = post.p_acos_over_max >= float(policy.posterior_reduce_probability) and post.confidence >= float(policy.posterior_min_confidence)
+            required = float(policy.posterior_reduce_probability)
+            ok = post.p_acos_over_max >= required and post.confidence >= float(policy.posterior_min_confidence)
         elif item.rule_id in SCALE:
-            threshold = (
+            required = (
                 float(policy.posterior_budget_scale_probability)
                 if item.rule_id in BUDGET_SCALE
                 else float(policy.posterior_scale_probability)
             )
-            ok = post.p_acos_under_target >= threshold and post.confidence >= float(policy.posterior_min_confidence)
+            ok = post.p_acos_under_target >= required and post.confidence >= float(policy.posterior_min_confidence)
+        else:
+            required = 0.0
         if ok:
             kept.append(item)
         else:
@@ -85,7 +103,7 @@ def gate(decisions: list[Decision], snapshot: dict[str, Any], policy: StrategyPo
                 "plan_key": item.plan_key,
                 "rule_id": item.rule_id,
                 "entity_id": item.entity_id,
-                "p_required": threshold if item.rule_id in SCALE else float(policy.posterior_reduce_probability),
+                "p_required": required,
             })
     return kept, suppressed, (delay, cfg, aov)
 
