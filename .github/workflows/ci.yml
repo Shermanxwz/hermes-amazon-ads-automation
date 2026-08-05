@@ -90,17 +90,33 @@ jobs:
         include:
           - hermes: "0.18.2"
             install_spec: "hermes-agent==0.18.2"
+            source_ref: ""
           - hermes: "0.19.0"
             install_spec: "hermes-agent==0.19.0"
+            source_ref: ""
           - hermes: "0.20.0 (v2026.8.3)"
-            install_spec: "hermes-agent @ https://github.com/NousResearch/hermes-agent/archive/refs/tags/v2026.8.3.tar.gz"
+            install_spec: ""
+            source_ref: "v2026.8.3"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install "${{ matrix.install_spec }}"
+      - name: Install packaged Hermes
+        if: matrix.install_spec != ''
+        run: python -m pip install "${{ matrix.install_spec }}"
+      - name: Checkout Hermes source
+        if: matrix.source_ref != ''
+        uses: actions/checkout@v6
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ matrix.source_ref }}
+          path: .ci-hermes-agent
+          persist-credentials: false
+      - name: Install Hermes source in editable mode
+        if: matrix.source_ref != ''
+        run: python -m pip install -e .ci-hermes-agent
       - run: PYTHONPATH="$PWD/control-plane" python tests/real_hermes_smoke.py
 
   amazon-official-contract:
