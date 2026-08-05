@@ -137,7 +137,13 @@ jobs:
       - run: python -m playwright install --with-deps chromium firefox webkit
       - uses: actions/checkout@v6
         with: {repository: NousResearch/hermes-agent, ref: v2026.8.3, path: .ci-hermes-agent, persist-credentials: false}
-      - run: python -m pip install -e .ci-hermes-agent
+      - name: Install pinned Hermes and remove foreign source tree
+        shell: bash
+        run: |
+          python -m pip install .ci-hermes-agent
+          python -c 'import hermes_cli'
+          rm -rf .ci-hermes-agent
+          test ! -e .ci-hermes-agent
       - run: bash scripts/run_full_sandbox.sh
         env: {FULL_SANDBOX_ARTIFACT_DIR: "${{ github.workspace }}/artifacts/sealed-v4"}
       - uses: actions/upload-artifact@v4
