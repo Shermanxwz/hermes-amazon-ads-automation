@@ -8,7 +8,16 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP_PARTS = {".git", ".venv", "__pycache__", "node_modules", "build", "dist"}
+SKIP_PARTS = {
+    ".git",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "build",
+    "dist",
+    "artifacts",
+}
+SKIP_PREFIXES = (".ci-",)
 PATTERNS = [
     re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bAtza\|[A-Za-z0-9_-]{20,}\b"),
@@ -18,10 +27,18 @@ PATTERNS = [
 TEXT_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".json", ".js", ".css", ".html", ".sh", ".toml", ".service", ".conf", ".example", ".env", ".txt", ""}
 
 
+def _is_excluded(path: Path) -> bool:
+    return any(
+        part in SKIP_PARTS or part.startswith(SKIP_PREFIXES)
+        for part in path.parts
+    )
+
+
 def scan(root: Path = ROOT) -> list[tuple[Path, int]]:
     hits: list[tuple[Path, int]] = []
     for path in root.rglob("*"):
-        if not path.is_file() or any(part in SKIP_PARTS for part in path.parts):
+        relative = path.relative_to(root)
+        if not path.is_file() or _is_excluded(relative):
             continue
         if path.suffix.lower() not in TEXT_SUFFIXES and path.name not in {"Dockerfile", ".gitignore"}:
             continue
@@ -31,7 +48,7 @@ def scan(root: Path = ROOT) -> list[tuple[Path, int]]:
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
             if any(pattern.search(line) for pattern in PATTERNS):
-                hits.append((path.relative_to(root), lineno))
+                hits.append((relative, lineno))
     return hits
 
 
