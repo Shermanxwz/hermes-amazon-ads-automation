@@ -4,9 +4,8 @@ from importlib import import_module
 import threading
 from typing import Final
 
-# This is the single authoritative order for legacy runtime extensions.  New
-# extensions must declare their position here rather than adding another
-# package-level import side effect.
+# This is the single authoritative order for runtime extensions. Extensions
+# later in the tuple wrap earlier safety boundaries; verification remains last.
 EXTENSION_ORDER: Final[tuple[str, ...]] = (
     "closed_loop",
     "closed_loop_fixes",
@@ -26,6 +25,10 @@ EXTENSION_ORDER: Final[tuple[str, ...]] = (
     "structural_hardening",
     "write_batch_hardening",
     "approval_contract_fixes",
+    # Sealed autonomy is deliberately installed only after all structural,
+    # approval-contract and batch validators exist. It may release an exact SP
+    # plan from per-plan approval, but cannot bypass those validators.
+    "sealed_autonomy",
     "hermes_compat",
     "hermes_lifecycle",
     # Verification remains the final owner of independent read-back.
@@ -53,7 +56,7 @@ def install_extensions() -> tuple[str, ...]:
             installed.append(name)
         from .api import Handler
 
-        Handler.server_version = "HermesAdsControl/3.3"
+        Handler.server_version = "HermesAdsControl/4.0"
         _INSTALLED = tuple(installed)
         return _INSTALLED
 

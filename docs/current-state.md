@@ -1,17 +1,22 @@
 # Current state
 
-Version 3.2 is an advertising-only, approval-gated Hermes full autopilot.
+Version 4.0 is an advertising-only, Sponsored Products sealed ACOS autopilot.
 
 It combines:
 
 - live Amazon Ads MCP tool and JSON Schema discovery through Hermes;
-- deterministic sponsored-ads optimization for routine operations;
-- payload-bound human approval for Campaign and other structural/high-risk plans;
+- deterministic Direct Amazon Ads API fallbacks for every required SP operation;
+- delay-aware Bayesian CVR/AOV/ACOS posteriors instead of heuristic certainty;
+- global budget reallocation, bounded hourly pacing and lifecycle quarantine/recovery;
+- a Profile-bound Sponsored Products standing-authorization envelope for atomic Campaign, Ad Group, Product Ad, Target and reversible PAUSED/ENABLED maintenance;
+- payload-bound human approval for every operation outside that standing envelope;
 - atomic multi-step execution with created Amazon ID binding;
 - Executor-only writes and different-session Verifier read-back;
 - report lineage, Marketing Stream ingestion, recovery, audit and bounded storage;
-- an authenticated Web approval and operations surface.
+- legacy Ads API contract drift checks plus Unified API GA/Beta separation checks.
 
-Default mode is `observe` and execution is disabled. Routine writes become autonomous only in `autopilot`. Structural/high-risk writes additionally require an unexpired exact approval. Billing, account administration, unknown semantics, unacknowledged schema drift, irreversible deletes and black-box composite/bulk mutations remain permanently blocked.
+Default deployment mode remains `observe` with execution disabled. After the owner explicitly enables `autopilot`, routine SP optimization writes and exact structural plans inside the sealed envelope can run without per-plan approval. Campaigns must be created PAUSED, within the `HERMES-SP-` namespace and conservative budget limits, then independently verified before ENABLED. Sponsored Brands, Sponsored Display, Sponsored TV, DSP, locale expansion and black-box MCP workflows remain outside sealed autonomy.
 
-Repository engineering cannot fabricate advertiser-specific production evidence. Production acceptance still requires the owner’s OAuth, authenticated MCP catalog, real report lifecycle, Test Account or bounded real-profile Campaign-create canary, independent Amazon read-back, attribution-window observation and VPS recovery drills.
+Billing, account administration, users, roles, permissions, unknown semantics, unacknowledged schema drift, irreversible delete/archive/remove operations and cross-region writes remain permanently blocked.
+
+Repository sandbox evidence cannot fabricate advertiser-specific Amazon evidence. Final production activation still requires the owner OAuth token, authenticated MCP `tools/list`, per-Profile capability attestation, a Test Account or bounded live SP canary, independent Amazon read-back, a mature attribution-window shadow/canary review and the target VPS reboot/restore drill.

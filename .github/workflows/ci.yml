@@ -2,14 +2,12 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, agent/hermes-amazon-ads-autopilot]
   pull_request:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
 
@@ -20,17 +18,14 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
-      matrix:
-        python: ["3.11", "3.12", "3.13"]
+      matrix: {python: ["3.11", "3.12", "3.13"]}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python }}
+        with: {python-version: "${{ matrix.python }}"}
       - run: python -m pip install coverage==7.13.3
       - run: bash scripts/coverage.sh
-        env:
-          COVERAGE_MIN: "80"
+        env: {COVERAGE_MIN: "80"}
 
   quality-security:
     runs-on: ubuntu-latest
@@ -38,11 +33,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+        with: {python-version: "3.12"}
       - uses: actions/setup-node@v5
-        with:
-          node-version: "22"
+        with: {node-version: "22"}
       - run: python -m pip install ruff==0.12.11 bandit==1.8.6
       - run: bash scripts/quality.sh
 
@@ -52,8 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+        with: {python-version: "3.12"}
       - run: sudo apt-get update && sudo apt-get install -y nginx
       - run: bash scripts/validate_deploy.sh
 
@@ -63,8 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+        with: {python-version: "3.12"}
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium firefox webkit
       - run: PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" python tests/browser_e2e.py
@@ -76,8 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+        with: {python-version: "3.12"}
       - run: PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" python tests/stress_recovery.py
 
   real-hermes:
@@ -88,34 +78,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - hermes: "0.18.2"
-            install_spec: "hermes-agent==0.18.2"
-            source_ref: ""
-          - hermes: "0.19.0"
-            install_spec: "hermes-agent==0.19.0"
-            source_ref: ""
-          - hermes: "0.20.0 (v2026.8.3)"
-            install_spec: ""
-            source_ref: "v2026.8.3"
+          - {hermes: "0.18.2", install_spec: "hermes-agent==0.18.2", source_ref: ""}
+          - {hermes: "0.19.0", install_spec: "hermes-agent==0.19.0", source_ref: ""}
+          - {hermes: "0.20.0 (v2026.8.3)", install_spec: "", source_ref: "v2026.8.3"}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+        with: {python-version: "3.12"}
       - run: python -m pip install --upgrade pip
-      - name: Install packaged Hermes
-        if: matrix.install_spec != ''
+      - if: matrix.install_spec != ''
         run: python -m pip install "${{ matrix.install_spec }}"
-      - name: Checkout Hermes source
-        if: matrix.source_ref != ''
+      - if: matrix.source_ref != ''
         uses: actions/checkout@v6
-        with:
-          repository: NousResearch/hermes-agent
-          ref: ${{ matrix.source_ref }}
-          path: .ci-hermes-agent
-          persist-credentials: false
-      - name: Install Hermes source in editable mode
-        if: matrix.source_ref != ''
+        with: {repository: NousResearch/hermes-agent, ref: "${{ matrix.source_ref }}", path: .ci-hermes-agent, persist-credentials: false}
+      - if: matrix.source_ref != ''
         run: python -m pip install -e .ci-hermes-agent
       - run: PYTHONPATH="$PWD/control-plane" python tests/real_hermes_smoke.py
 
@@ -125,25 +101,33 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - run: >-
-          python scripts/check_amazon_mcp_contract.py
-          --fixture tests/fixtures/amazon_ads_mcp_contract.json
-          --check
-          --output official/amazon-mcp-contract.ci.json
-      - run: >-
-          python scripts/sync_official_contracts.py
-          --check
-          --strict-extended
-          --output official/postman-capabilities.ci.json
-      - run: >-
-          python scripts/check_project_capability_policy.py
-          --manifest official/postman-capabilities.ci.json
-          --policy official/project-capability-policy.json
-          --output official/project-capability-policy.ci.json
-      - run: >-
-          python scripts/check_official_fingerprint.py
-          --manifest official/postman-capabilities.ci.json
-          --baseline official/postman-semantic-baseline.json
+        with: {python-version: "3.12"}
+      - run: python scripts/check_amazon_mcp_contract.py --fixture tests/fixtures/amazon_ads_mcp_contract.json --check --output official/amazon-mcp-contract.ci.json
+      - run: python scripts/sync_official_contracts.py --check --strict-extended --output official/postman-capabilities.ci.json
+      - run: python scripts/check_unified_api_contract.py --check --output official/unified-api-contract.ci.json
+      - run: python scripts/check_project_capability_policy.py --manifest official/postman-capabilities.ci.json --policy official/project-capability-policy.json --output official/project-capability-policy.ci.json
+      - run: python scripts/check_official_fingerprint.py --manifest official/postman-capabilities.ci.json --baseline official/postman-semantic-baseline.json
       - run: python scripts/check_amazon_mcp_reachability.py
+
+  sealed-v4-full-sandbox:
+    name: sealed ACOS v4 full sandbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12"}
+      - uses: actions/setup-node@v5
+        with: {node-version: "22"}
+      - run: sudo apt-get update && sudo apt-get install -y nginx
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install coverage==7.13.3 ruff==0.12.11 bandit==1.8.6 playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium firefox webkit
+      - uses: actions/checkout@v6
+        with: {repository: NousResearch/hermes-agent, ref: v2026.8.3, path: .ci-hermes-agent, persist-credentials: false}
+      - run: python -m pip install -e .ci-hermes-agent
+      - run: bash scripts/run_full_sandbox.sh
+        env: {FULL_SANDBOX_ARTIFACT_DIR: "${{ github.workspace }}/artifacts/sealed-v4"}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: "sealed-acos-v4-sandbox-${{ github.sha }}", path: artifacts/sealed-v4, if-no-files-found: error}

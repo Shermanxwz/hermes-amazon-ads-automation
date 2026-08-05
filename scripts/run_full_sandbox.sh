@@ -7,117 +7,43 @@ RESULTS="$ARTIFACT_DIR/results.tsv"
 mkdir -p "$ARTIFACT_DIR"
 : > "$RESULTS"
 
-pass=0
-fail=0
-external=0
-
 record() {
   local status="$1" layer="$2" name="$3" detail="${4:-}"
   printf '%s\t%s\t%s\t%s\n' "$status" "$layer" "$name" "${detail//$'\n'/ }" >> "$RESULTS"
-  case "$status" in
-    PASS) pass=$((pass + 1));;
-    FAIL) fail=$((fail + 1));;
-    EXTERNAL) external=$((external + 1));;
-  esac
 }
-
 run_required() {
   local layer="$1" name="$2"; shift 2
   echo "==> $name"
-  if "$@"; then
-    record PASS "$layer" "$name"
-  else
-    local code=$?
-    record FAIL "$layer" "$name" "exit=$code"
-  fi
-  # Required checks are aggregated. The report generator below owns the final
-  # non-zero exit so every layer runs and report.json/report.md are produced.
+  if "$@"; then record PASS "$layer" "$name"; else local code=$?; record FAIL "$layer" "$name" "exit=$code"; fi
   return 0
 }
 
-run_external_when_missing() {
-  local layer="$1" name="$2" requirement="$3"; shift 3
-  echo "==> $name"
-  if "$@"; then
-    record PASS "$layer" "$name"
-  else
-    local code=$?
-    record EXTERNAL "$layer" "$name" "$requirement; exit=$code"
-  fi
-}
-
-export PYTHONPATH="$ROOT/control-plane:$ROOT/hermes-plugin:$ROOT/tests"
+export PYTHONPATH="$ROOT/control-plane:$ROOT/hermes-plugin:$ROOT/tests:$ROOT"
 export PYTHONWARNINGS=error
 
-run_required repository "Compile all Python sources" \
-  python3 -m compileall -q "$ROOT/control-plane" "$ROOT/hermes-plugin" "$ROOT/scripts" "$ROOT/integrations" "$ROOT/tests"
+run_required repository "Compile all Python sources" python3 -m compileall -q "$ROOT/control-plane" "$ROOT/hermes-plugin" "$ROOT/scripts" "$ROOT/integrations" "$ROOT/tests"
 run_required repository "Unit and integration suite" bash "$ROOT/scripts/validate.sh"
-run_required amazon_mcp "Offline MCP initialize/tools-list/schema/authority fixture" \
-  python3 "$ROOT/scripts/check_amazon_mcp_contract.py" \
-    --fixture "$ROOT/tests/fixtures/amazon_ads_mcp_contract.json" \
-    --check --output "$ARTIFACT_DIR/mcp-fixture-manifest.json"
-run_required amazon_postman "Official Postman semantic compiler and strict capability matrix" \
-  python3 "$ROOT/scripts/sync_official_contracts.py" \
-    --check --strict-extended --output "$ARTIFACT_DIR/postman-capabilities.json"
-run_required amazon_postman "Every official capability has an explicit project policy" \
-  python3 "$ROOT/scripts/check_project_capability_policy.py" \
-    --manifest "$ARTIFACT_DIR/postman-capabilities.json" \
-    --policy "$ROOT/official/project-capability-policy.json" \
-    --output "$ARTIFACT_DIR/project-capability-policy.json"
-run_required amazon_postman "Official Postman fingerprint drift gate" \
-  python3 "$ROOT/scripts/check_official_fingerprint.py" \
-    --manifest "$ARTIFACT_DIR/postman-capabilities.json" \
-    --baseline "$ROOT/official/postman-semantic-baseline.json"
-run_required amazon_mcp "Official Amazon Ads MCP endpoint reachability" \
-  python3 "$ROOT/scripts/check_amazon_mcp_reachability.py"
-run_required recovery "Concurrency, recovery, HTTP and SQLite stress" \
-  python3 "$ROOT/tests/stress_recovery.py"
+run_required decision_os "Sealed ACOS v4 focused suite" python3 -m unittest discover -s "$ROOT/tests" -p 'test_*v4.py' -v
+run_required amazon_mcp "Offline MCP initialize/tools-list/schema/authority fixture" python3 "$ROOT/scripts/check_amazon_mcp_contract.py" --fixture "$ROOT/tests/fixtures/amazon_ads_mcp_contract.json" --check --output "$ARTIFACT_DIR/mcp-fixture-manifest.json"
+run_required amazon_postman "Official legacy Postman semantic compiler and strict capability matrix" python3 "$ROOT/scripts/sync_official_contracts.py" --check --strict-extended --output "$ARTIFACT_DIR/postman-capabilities.json"
+run_required amazon_postman "Official Unified API GA/Beta separation contract" python3 "$ROOT/scripts/check_unified_api_contract.py" --check --output "$ARTIFACT_DIR/unified-api-contract.json"
+run_required amazon_postman "Every official capability has an explicit project policy" python3 "$ROOT/scripts/check_project_capability_policy.py" --manifest "$ARTIFACT_DIR/postman-capabilities.json" --policy "$ROOT/official/project-capability-policy.json" --output "$ARTIFACT_DIR/project-capability-policy.json"
+run_required amazon_postman "Official Postman fingerprint drift gate" python3 "$ROOT/scripts/check_official_fingerprint.py" --manifest "$ARTIFACT_DIR/postman-capabilities.json" --baseline "$ROOT/official/postman-semantic-baseline.json"
+run_required amazon_mcp "Official Amazon Ads MCP endpoint reachability" python3 "$ROOT/scripts/check_amazon_mcp_reachability.py"
+run_required recovery "Concurrency, recovery, HTTP and SQLite stress" python3 "$ROOT/tests/stress_recovery.py"
 
-if command -v coverage >/dev/null 2>&1; then
-  run_required quality "Branch coverage gate" bash "$ROOT/scripts/coverage.sh"
-else
-  record EXTERNAL quality "Branch coverage gate" "coverage package is not installed"
-fi
-
-if command -v ruff >/dev/null 2>&1 && command -v bandit >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
-  run_required quality "Ruff, Bandit, JavaScript and secret checks" bash "$ROOT/scripts/quality.sh"
-else
-  record EXTERNAL quality "Ruff, Bandit, JavaScript and secret checks" "ruff, bandit and Node.js are required"
-fi
-
-if command -v nginx >/dev/null 2>&1; then
-  run_required deployment "Wheel, fresh install, systemd and Nginx validation" bash "$ROOT/scripts/validate_deploy.sh"
-else
-  record EXTERNAL deployment "Wheel, fresh install, systemd and Nginx validation" "nginx is not installed"
-fi
-
+if command -v coverage >/dev/null 2>&1; then run_required quality "Branch coverage gate" bash "$ROOT/scripts/coverage.sh"; else record EXTERNAL quality "Branch coverage gate" "coverage package is not installed"; fi
+if command -v ruff >/dev/null 2>&1 && command -v bandit >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then run_required quality "Ruff, Bandit, JavaScript and secret checks" bash "$ROOT/scripts/quality.sh"; else record EXTERNAL quality "Ruff, Bandit, JavaScript and secret checks" "ruff, bandit and Node.js are required"; fi
+if command -v nginx >/dev/null 2>&1; then run_required deployment "Wheel, fresh install, systemd and Nginx validation" bash "$ROOT/scripts/validate_deploy.sh"; else record EXTERNAL deployment "Wheel, fresh install, systemd and Nginx validation" "nginx is not installed"; fi
 if python3 -c 'import playwright' >/dev/null 2>&1; then
-  run_required browser "Real Chromium Web and approval E2E" \
-    python3 "$ROOT/tests/browser_e2e.py"
-else
-  record EXTERNAL browser "Real Chromium Web and approval E2E" "playwright is not installed"
-fi
-
-if python3 -c 'import hermes_cli' >/dev/null 2>&1; then
-  run_required hermes "Pinned real Hermes plugin-manager load" python3 "$ROOT/tests/real_hermes_smoke.py"
-else
-  record EXTERNAL hermes "Pinned real Hermes plugin-manager load" "hermes-agent==0.18.2 is not installed"
-fi
+  run_required browser "Real Chromium Web and approval E2E" python3 "$ROOT/tests/browser_e2e.py"
+  run_required browser "Chromium/Firefox/WebKit matrix E2E" python3 "$ROOT/tests/browser_matrix_e2e.py"
+else record EXTERNAL browser "Browser E2E" "playwright is not installed"; fi
+if python3 -c 'import hermes_cli' >/dev/null 2>&1; then run_required hermes "Pinned real Hermes plugin-manager load" python3 "$ROOT/tests/real_hermes_smoke.py"; else record EXTERNAL hermes "Pinned real Hermes plugin-manager load" "Hermes source/package is not installed"; fi
 
 if [[ "${FULL_SANDBOX_LIVE_MCP:-0}" == "1" ]]; then
-  if [[ -n "${AMAZON_ADS_MCP_ACCESS_TOKEN:-}" ]]; then
-    run_required amazon_live "Authenticated live MCP initialize and complete tools/list" \
-      python3 "$ROOT/scripts/check_amazon_mcp_contract.py" \
-        --check --output "$ARTIFACT_DIR/mcp-live-manifest.json"
-  else
-    record FAIL amazon_live "Authenticated live MCP initialize and complete tools/list" \
-      "FULL_SANDBOX_LIVE_MCP=1 requires AMAZON_ADS_MCP_ACCESS_TOKEN"
-  fi
-else
-  record EXTERNAL amazon_live "Authenticated live MCP initialize and complete tools/list" \
-    "set FULL_SANDBOX_LIVE_MCP=1 with an owner access token"
-fi
-
+  if [[ -n "${AMAZON_ADS_MCP_ACCESS_TOKEN:-}" ]]; then run_required amazon_live "Authenticated live MCP initialize and complete tools/list" python3 "$ROOT/scripts/check_amazon_mcp_contract.py" --check --output "$ARTIFACT_DIR/mcp-live-manifest.json"; else record FAIL amazon_live "Authenticated live MCP initialize and complete tools/list" "FULL_SANDBOX_LIVE_MCP=1 requires AMAZON_ADS_MCP_ACCESS_TOKEN"; fi
+else record EXTERNAL amazon_live "Authenticated live MCP initialize and complete tools/list" "set FULL_SANDBOX_LIVE_MCP=1 with an owner access token"; fi
 record EXTERNAL amazon_live "OAuth authorization and refresh rotation" "requires owner Login with Amazon consent"
 record EXTERNAL amazon_live "Real Profiles, currencies and manager relationships" "account-specific evidence"
 record EXTERNAL amazon_live "Real report submit, poll, GZIP download and parsing" "requires Amazon report IDs"
@@ -134,35 +60,21 @@ import csv, json, sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-
 source, json_path, md_path = map(Path, sys.argv[1:])
 rows = []
 with source.open(encoding="utf-8") as handle:
     for status, layer, name, detail in csv.reader(handle, delimiter="\t"):
         rows.append({"status": status, "layer": layer, "name": name, "detail": detail})
-counts = Counter(row["status"] for row in rows)
-layers = defaultdict(Counter)
-for row in rows:
-    layers[row["layer"]][row["status"]] += 1
+counts = Counter(row["status"] for row in rows); layers = defaultdict(Counter)
+for row in rows: layers[row["layer"]][row["status"]] += 1
 overall = "FAIL" if counts["FAIL"] else "PASS_WITH_EXTERNAL_ACCEPTANCE" if counts["EXTERNAL"] else "PASS"
-report = {
-    "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    "overall": overall,
-    "counts": dict(counts),
-    "layers": {key: dict(value) for key, value in sorted(layers.items())},
-    "results": rows,
-}
+report = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "overall": overall,
+          "counts": dict(counts), "layers": {key: dict(value) for key, value in sorted(layers.items())}, "results": rows}
 json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-lines = [
-    "# Hermes Amazon Ads Full Sandbox Report", "",
-    f"- Overall: **{overall}**",
-    f"- PASS: {counts['PASS']}", f"- FAIL: {counts['FAIL']}",
-    f"- EXTERNAL: {counts['EXTERNAL']}", "",
-    "| Status | Layer | Check | Detail |", "|---|---|---|---|",
-]
-for row in rows:
-    detail = row["detail"].replace("|", "\\|")
-    lines.append(f"| {row['status']} | {row['layer']} | {row['name']} | {detail} |")
+lines = ["# Hermes Amazon Ads Sealed ACOS v4 Full Sandbox Report", "", f"- Overall: **{overall}**",
+         f"- PASS: {counts['PASS']}", f"- FAIL: {counts['FAIL']}", f"- EXTERNAL: {counts['EXTERNAL']}", "",
+         "| Status | Layer | Check | Detail |", "|---|---|---|---|"]
+for row in rows: lines.append(f"| {row['status']} | {row['layer']} | {row['name']} | {row['detail'].replace('|', chr(92)+'|')} |")
 md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 print(json.dumps({"overall": overall, **counts, "report": str(json_path)}, ensure_ascii=False))
 sys.exit(1 if overall == "FAIL" else 0)
