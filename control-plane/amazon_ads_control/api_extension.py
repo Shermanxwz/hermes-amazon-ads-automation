@@ -3,6 +3,12 @@ from __future__ import annotations
 from importlib import resources
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .runtime_readiness import (
+    authorize_with_runtime_gate,
+    create_task_with_runtime_gate,
+    readiness_snapshot,
+)
+
 _INSTALLED = False
 
 
@@ -36,56 +42,30 @@ def install() -> None:
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/health/ready":
-            self.app.store.reconcile_expired_reservations()
-            integrity = self.app.store.integrity_check()
-            dashboard = self.app.store.dashboard()
-            settings = dashboard.get("settings") if isinstance(dashboard.get("settings"), dict) else {}
-            catalog = dashboard.get("catalog") if isinstance(dashboard.get("catalog"), dict) else {}
-            storage = dashboard.get("storage") if isinstance(dashboard.get("storage"), dict) else {}
-            maintenance = storage.get("latest_maintenance") if isinstance(storage.get("latest_maintenance"), dict) else {}
-            runtime = dashboard.get("runtime_status") if isinstance(dashboard.get("runtime_status"), list) else []
-            plugin = next((item for item in runtime if item.get("component") == "hermes-plugin"), None)
-            plugin_state = plugin.get("state") if isinstance(plugin, dict) and isinstance(plugin.get("state"), dict) else {}
-            outbox = plugin_state.get("result_outbox") if isinstance(plugin_state.get("result_outbox"), dict) else {}
-            checks = {
-                "database_integrity": bool(integrity.get("ok")),
-                "catalog_loaded": int(catalog.get("tools") or 0) > 0,
-                "catalog_drift_clear": int(catalog.get("drifted") or 0) == 0,
-                "storage_below_hard_limit": str(maintenance.get("pressure") or "normal") != "hard",
-                "result_outbox_below_limit": not bool(outbox.get("over_limit")),
-            }
-            mode = str(settings.get("mode") or "observe")
-            execution_enabled = bool(settings.get("execution_enabled"))
-            autopilot_requested = mode == "autopilot"
-            autopilot_ready = all(checks.values()) and execution_enabled
-            service_ready = checks["database_integrity"]
-            status = 200 if service_ready and (not autopilot_requested or autopilot_ready) else 503
-            self._respond(status, {
-                "ok": service_ready,
-                "service_ready": service_ready,
-                "autopilot_ready": autopilot_ready,
-                "autopilot_requested": autopilot_requested,
-                "checks": checks,
-                "database": integrity,
-                "mode": mode,
-                "execution_enabled": execution_enabled,
-                "catalog": catalog,
-                "pending_callbacks": int(dashboard.get("pending_callbacks") or 0),
-                "hermes_plugin_last_seen": plugin.get("updated_at") if isinstance(plugin, dict) else None,
-            })
+            state = readiness_snapshot(self.app.store)
+            status = (
+                200
+                if state["service_ready"]
+                and (not state["autopilot_requested"] or state["writable"])
+                else 503
+            )
+            self._respond(status, state)
             return
         if parsed.path != "/api/reports":
             return original_get(self)
         if not self._require_browser():
             return
         query = parse_qs(parsed.query)
-        self._respond(200, {
-            "reports": self.app.store.list_report_jobs(
-                self._limit(query, 100),
-                query.get("profile_id", [None])[0],
-                query.get("status", [None])[0],
-            )
-        })
+        self._respond(
+            200,
+            {
+                "reports": self.app.store.list_report_jobs(
+                    self._limit(query, 100),
+                    query.get("profile_id", [None])[0],
+                    query.get("status", [None])[0],
+                )
+            },
+        )
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
@@ -95,6 +75,11 @@ def install() -> None:
             "/api/agent/report-evidence": "report_evidence",
             "/api/agent/prepare-write": "prepare_write",
             "/api/agent/runtime-status": "runtime_status",
+            # Runtime readiness is enforced at the network boundary used by
+            # Hermes. Direct service methods remain deterministic and easy to
+            # exercise in unit tests.
+            "/api/agent/tool-check": "authorize_tool_runtime",
+            "/api/agent/tasks": "create_task_runtime",
         }
         method = routes.get(path)
         if not method:
@@ -107,12 +92,31 @@ def install() -> None:
         if not self._require_agent():
             return
         try:
+            if method == "authorize_tool_runtime":
+                result = authorize_with_runtime_gate(self.app.service, data)
+                self._respond(200 if result.get("allowed", False) else 403, result)
+                return
+            if method == "create_task_runtime":
+                result = create_task_with_runtime_gate(
+                    self.app.service,
+                    data,
+                    str(data.get("actor") or "hermes-main"),
+                )
+                self._respond(201, result)
+                return
             result = getattr(self.app.service, method)(data)
             self._respond(201 if method == "create_report" else 200, result)
         except (ValueError, KeyError) as exc:
             self._respond(400, {"error": str(exc)})
         except Exception as exc:
-            self.app.store.event("error", "api.closed_loop_error", "controller", None, str(exc), {"path": path})
+            self.app.store.event(
+                "error",
+                "api.closed_loop_error",
+                "controller",
+                None,
+                str(exc),
+                {"path": path},
+            )
             self._respond(500, {"error": "internal_error"})
 
     def do_PUT(self) -> None:
@@ -126,10 +130,16 @@ def install() -> None:
             return
         if not self._require_browser(mutate=True):
             return
-        tool_name = unquote(path[len("/api/catalog/"):-len("/acknowledge")].strip("/"))
+        tool_name = unquote(
+            path[len("/api/catalog/") : -len("/acknowledge")].strip("/")
+        )
         expected_hash = str(data.get("schema_hash") or "").strip().lower()
-        if len(expected_hash) != 64 or any(char not in "0123456789abcdef" for char in expected_hash):
-            self._respond(400, {"error": "a full 64-character schema_hash is required"})
+        if len(expected_hash) != 64 or any(
+            char not in "0123456789abcdef" for char in expected_hash
+        ):
+            self._respond(
+                400, {"error": "a full 64-character schema_hash is required"}
+            )
             return
         try:
             with self.app.store.connection() as conn:
@@ -142,7 +152,9 @@ def install() -> None:
                     if not row or not row["enabled"]:
                         raise KeyError("enabled MCP tool not found")
                     if str(row["schema_hash"]).lower() != expected_hash:
-                        raise ValueError("schema hash changed; refresh and review the current schema")
+                        raise ValueError(
+                            "schema hash changed; refresh and review the current schema"
+                        )
                     if not row["drifted"]:
                         raise ValueError("tool has no pending schema drift")
                     cursor = conn.execute(
@@ -150,13 +162,18 @@ def install() -> None:
                         (tool_name, expected_hash),
                     )
                     if cursor.rowcount != 1:
-                        raise ValueError("schema drift changed concurrently; refresh and retry")
+                        raise ValueError(
+                            "schema drift changed concurrently; refresh and retry"
+                        )
                     conn.commit()
                 except Exception:
                     conn.rollback()
                     raise
             self.app.store.event(
-                "warning", "mcp.catalog.drift_acknowledged", "operator", None,
+                "warning",
+                "mcp.catalog.drift_acknowledged",
+                "operator",
+                None,
                 f"Acknowledged schema drift for {tool_name}",
                 {"schema_hash": expected_hash},
             )
@@ -164,7 +181,14 @@ def install() -> None:
         except (ValueError, KeyError) as exc:
             self._respond(400, {"error": str(exc)})
         except Exception as exc:
-            self.app.store.event("error", "api.put_error", "controller", None, str(exc), {"path": path})
+            self.app.store.event(
+                "error",
+                "api.put_error",
+                "controller",
+                None,
+                str(exc),
+                {"path": path},
+            )
             self._respond(500, {"error": "internal_error"})
 
     Handler._static = static

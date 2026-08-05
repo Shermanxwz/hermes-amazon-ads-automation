@@ -59,15 +59,16 @@ jobs:
 
   browser-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: python -m pip install playwright==1.57.0
-      - run: python -m playwright install --with-deps chromium
+      - run: python -m playwright install --with-deps chromium firefox webkit
       - run: PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" python tests/browser_e2e.py
+      - run: PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" python tests/browser_matrix_e2e.py
 
   stress-recovery:
     runs-on: ubuntu-latest
@@ -86,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        hermes: ["0.18.2", "0.19.0"]
+        hermes: ["0.18.2", "0.19.0", "0.20.0"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6

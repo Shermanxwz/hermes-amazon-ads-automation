@@ -55,6 +55,15 @@ def main() -> int:
         store = Store(settings.db_path)
         service = ControlService(store)
         store.sync_catalog([descriptor_from_payload(CREATE_CAMPAIGN)])
+        store.record_runtime_status(
+            "hermes-plugin",
+            {
+                "readiness_protocol": 1,
+                "resources": {"tier": "2c2g", "cpu_count": 2, "memory_total_mb": 2048},
+                "result_outbox": {"pending": 0, "bytes": 0, "over_limit": False},
+                "catalog_sync": {"ok": True, "tool_count": 1},
+            },
+        )
         managed = service.create_managed_plan({
             "title": "Browser exact Campaign approval",
             "profile": {
@@ -126,6 +135,7 @@ def main() -> int:
                 assert page.get_by_text("本页怎么理解").is_visible()
                 assert page.get_by_text("Main 主控").first.is_visible()
                 assert page.locator("#mode-help").inner_text().startswith("仅观察")
+                page.locator("#readiness-pill").filter(has_text="READY").wait_for()
 
                 succeeded_row = page.locator("#reports tr").filter(has_text="browser-success")
                 failed_row = page.locator("#reports tr").filter(has_text="browser-failed")
@@ -169,6 +179,7 @@ def main() -> int:
 
                 page.get_by_role("button", name="自动运营").click()
                 page.locator("#mode-pill").filter(has_text="AUTOPILOT").wait_for()
+                page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
                 assert "Executor 可写" in page.locator("#execution-pill").inner_text()
                 assert "Executor 只执行" in page.locator("#mode-help").inner_text()
 

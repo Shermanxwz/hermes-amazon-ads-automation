@@ -1,4 +1,18 @@
 const renderClosedLoopBase=render;
+let runtimeReadiness=null;
+async function readinessStatus(){
+  try{
+    const response=await fetch("/health/ready",{credentials:"same-origin",headers:{"Accept":"application/json"}});
+    const data=await response.json().catch(()=>({service_ready:false,ready:false,writable:false,operational_state:"unavailable",blocking_checks:["invalid_readiness_response"]}));
+    return {...data,http_status:response.status};
+  }catch(error){
+    return {service_ready:false,ready:false,writable:false,configured:false,blocked:true,degraded:false,operational_state:"unavailable",blocking_checks:["readiness_endpoint_unavailable"],detail:String(error)};
+  }
+}
+refresh=async function(){
+  const [d,c,r]=await Promise.all([api("/api/dashboard"),api("/api/catalog?limit=2000"),readinessStatus()]);
+  dashboard=d;catalogTools=c.tools||[];runtimeReadiness=r;render();
+};
 function ensureApprovalTab(){
   if(!document.querySelector('[data-tab="approvals"]')){
     const button=document.createElement("button");button.dataset.tab="approvals";button.textContent="审批";
@@ -43,9 +57,28 @@ function bindApprovalActions(){
     return true;
   },"计划已拒绝").catch(()=>{}));
 }
+function readinessKind(state){return state==="writable"||state==="ready"?"good":state==="blocked"||state==="unavailable"?"bad":"warn"}
+function renderReadiness(settings){
+  const r=runtimeReadiness||{};
+  const configured=r.configured??(settings.mode==="autopilot"&&Boolean(settings.execution_enabled));
+  const state=String(r.operational_state||((configured)?"configured":"unknown"));
+  const execution=$("#execution-pill");
+  if(execution){
+    if(r.writable){execution.className="good";execution.textContent="Executor 可写"}
+    else if(configured&&r.blocked){execution.className="bad";execution.textContent="Executor 已配置 / 被阻断"}
+    else if(configured){execution.className="warn";execution.textContent="Executor 已配置 / 等待就绪"}
+    else{execution.className="warn";execution.textContent="Executor 写入关闭"}
+    execution.title=(r.blocking_checks||[]).join(", ")||"所有写入依赖正常";
+  }
+  let pill=$("#readiness-pill");
+  if(!pill){pill=document.createElement("span");pill.id="readiness-pill";document.querySelector(".status-strip")?.appendChild(pill)}
+  pill.className=readinessKind(state);pill.textContent=`运行态 ${state.toUpperCase()}`;
+  pill.title=(r.blocking_checks||[]).join(", ")||"无阻断项";
+}
 render=function(){
   renderClosedLoopBase();ensureApprovalTab();
-  const d=dashboard||{}, reports=d.reports||{}, counts=reports.counts||{};
+  const d=dashboard||{}, settings=d.settings||{}, reports=d.reports||{}, counts=reports.counts||{};
+  renderReadiness(settings);
   const pendingReports=["REQUESTED","SUBMITTED","IN_PROGRESS","SUCCEEDED","DOWNLOADED","VALIDATED"].reduce((sum,key)=>sum+Number(counts[key]||0),0);
   const failedReports=Number(counts.FAILED||0)+Number(counts.QUARANTINED||0);
   const reportPill=$("#report-pill");
@@ -80,6 +113,9 @@ render=function(){
     const boxState=box.over_limit?badge("Outbox 已达上限","bad"):pending?badge("待补投","warn"):badge("正常","good");
     return `<tr><td>${esc(x.component)}</td><td>${esc(x.updated_at)}</td><td>${esc(r.tier||"")} ${fmt(r.cpu_count)}C / ${fmt(r.memory_total_mb)}MB<br>Outbox ${fmt(pending)} / ${fmt(box.bytes)}B</td><td>${boxState}</td></tr>`;
   });
+  const ready=runtimeReadiness||{};
+  const blocking=(ready.blocking_checks||[]).join(", ")||"无";
+  runtimeRows.push(`<tr><td>runtime-readiness</td><td>${esc(ready.observed?.hermes_plugin_last_seen||"")}</td><td>配置 ${ready.configured?"AUTOPILOT":"非写入"}<br>阻断项 <span class="mono">${esc(blocking)}</span></td><td>${badge(String(ready.operational_state||"unknown"),readinessKind(String(ready.operational_state||"unknown")))}</td></tr>`);
   runtimeRows.push(`<tr><td>control-storage</td><td>${esc(storage.generated_at||"")}</td><td>DB ${fmt(files.database_mb)}MB / WAL ${fmt(files.wal_mb)}MB<br>可回收 ${fmt(storage.sqlite?.reclaimable_mb)}MB</td><td>${pressure==="hard"?badge("硬阈值暂停","bad"):pressure==="soft"?badge("压力清理","warn"):badge("正常","good")}</td></tr>`);
   const runtimeNode=$("#runtime-status");
   if(runtimeNode)runtimeNode.innerHTML=table(["组件","更新时间","资源 / 队列","状态"],runtimeRows);
@@ -92,4 +128,4 @@ render=function(){
   }
   if(rollupNode)rollupNode.innerHTML=table(["月份","级别 / 代码","Profile","数量","时间范围 / 样例"],(d.alert_rollups||[]).map(x=>`<tr><td>${esc(x.bucket_start)}</td><td>${badge(x.severity,statusKind(x.severity))}<br><span class="mono">${esc(x.code)}</span></td><td class="mono">${esc(x.profile_id||"全局")}</td><td>${fmt(x.alert_count)}</td><td>${esc(x.first_at)} → ${esc(x.last_at)}<br>${esc(x.sample_message||"")}</td></tr>`));
 };
-if(dashboard)render();
+if(dashboard)refresh().catch(err=>showNotice(err.message||String(err)));
