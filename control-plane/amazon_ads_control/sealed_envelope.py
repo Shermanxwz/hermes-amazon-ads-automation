@@ -14,6 +14,16 @@ ALLOWED_ACTIONS = {
     "pause", "enable", "resume", "disable", "update_state",
 }
 ALLOWED_FAMILIES = {"campaign", "ad_group", "ad", "target"}
+ACTION_FAMILIES = {
+    "create_campaign": "campaign",
+    "create_ad_group": "ad_group",
+    "create_ad": "ad",
+    "create_target": "target",
+    "create_keyword": "target",
+    "create_negative": "target",
+    "create_negative_keyword": "target",
+    "create_negative_target": "target",
+}
 
 
 def canonical(value: Any) -> str:
@@ -112,17 +122,23 @@ def standing_authorized(store: Any, decision: dict[str, Any], tool: dict[str, An
     args = payload.get("approved_args") if isinstance(payload.get("approved_args"), dict) else payload
     if DESTRUCTIVE.search(native) or DESTRUCTIVE.search(action) or DESTRUCTIVE.search(canonical(args)):
         return False, "delete/archive/remove operations remain permanently blocked"
-    if family not in ALLOWED_FAMILIES or action not in ALLOWED_ACTIONS:
-        return False, "operation is outside the sealed SP envelope"
     products = {str(x).upper() for x in values(args, "adProduct", "ad_product", "advertisingType") if x not in (None, "")}
     products.add(str(payload.get("ad_product") or item.get("ad_product") or "").upper())
     if products - {"", "SP", "SPONSORED_PRODUCTS", "SPONSOREDPRODUCTS"}:
         return False, "standing authorization is Sponsored Products only"
+    expected_family = ACTION_FAMILIES.get(action, family)
+    if action not in ALLOWED_ACTIONS or expected_family not in ALLOWED_FAMILIES:
+        return False, "operation is outside the sealed SP envelope"
+    if action in ACTION_FAMILIES and family != expected_family:
+        return False, "live MCP family does not match the planned SP operation"
     state = str(first(args, "state", "status") or payload.get("after") or item.get("desired_state") or "").upper()
     if action == "create_campaign":
-        name, budget = str(first(args, "name", "campaignName") or ""), number(args, "budget", "dailyBudget", "budgetAmount")
-        if not name.startswith(policy.sealed_sp_namespace + "-") or state != "PAUSED":
-            return False, "autonomous Campaign must use the namespace and be created PAUSED"
+        name = str(first(args, "name", "campaignName") or "")
+        budget = number(args, "budget", "dailyBudget", "budgetAmount")
+        if not name.startswith(policy.sealed_sp_namespace + "-"):
+            return False, "autonomous Campaign must use the configured namespace"
+        if state != "PAUSED":
+            return False, "autonomous Campaign must be created PAUSED"
         if budget is None or budget <= 0 or budget > float(policy.sealed_sp_max_campaign_budget):
             return False, "autonomous Campaign budget exceeds the envelope"
     elif action in {"pause", "disable", "enable", "resume", "update_state"}:
