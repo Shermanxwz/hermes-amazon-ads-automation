@@ -123,7 +123,9 @@ class StrategyPolicy:
     allow_state_changes: bool = False
     allow_official_recommendation_apply: bool = False
     recommendation_types: tuple[str, ...] = ("BID", "BUDGET", "KEYWORD", "TARGET")
-    auto_write_ad_products: tuple[str, ...] = ("SPONSORED_PRODUCTS", "SPONSORED_BRANDS", "SPONSORED_DISPLAY")
+    # Routine autonomous writes default to Sponsored Products only. Other ad
+    # products remain observable and require an explicit operator-approved policy.
+    auto_write_ad_products: tuple[str, ...] = ("SPONSORED_PRODUCTS",)
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any] | None) -> "StrategyPolicy":
