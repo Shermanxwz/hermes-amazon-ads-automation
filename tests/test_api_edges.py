@@ -11,6 +11,7 @@ from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from amazon_ads_control.api import MAX_BODY, build_server
+from amazon_ads_control.catalog import descriptor_from_payload
 from amazon_ads_control.config import Settings
 from amazon_ads_control.security import hash_password
 
@@ -83,6 +84,35 @@ class ApiEdgeTests(unittest.TestCase):
         status, _, headers = self.request("/api/logout", "POST", {}, {"Origin":"http://127.0.0.1", "X-CSRF-Token":self.csrf}, self.browser)
         self.assertEqual(status, 200); self.assertIn("Max-Age=0", headers["Set-Cookie"])
         self.assertEqual(self.request("/api/dashboard", opener=self.browser)[0], 401)
+
+    def test_schema_drift_ack_requires_current_full_hash(self):
+        store = self.server.RequestHandlerClass.app.store
+        name = "mcp_amazon_ads_campaign_management_query_campaigns"
+        base = {
+            "registered_name": name,
+            "native_name": "campaign_management-query_campaigns",
+            "source": "hermes-registry:na",
+            "schema": {"description":"Query campaigns", "parameters":{"type":"object","properties":{}}},
+        }
+        store.sync_catalog([descriptor_from_payload(base)])
+        changed = dict(base)
+        changed["schema"] = {
+            "description":"Query campaigns with state filter",
+            "parameters":{"type":"object","properties":{"state":{"type":"string"}}},
+        }
+        store.sync_catalog([descriptor_from_payload(changed)])
+        tool = store.get_tool(name)
+        self.assertTrue(tool["drifted"])
+        current_hash = tool["schema_hash"]
+        self.login()
+        headers = {"Origin":"http://127.0.0.1", "X-CSRF-Token":self.csrf}
+        path = f"/api/catalog/{name}/acknowledge"
+        self.assertEqual(self.request(path, "PUT", {}, headers, self.browser)[0], 400)
+        self.assertEqual(self.request(path, "PUT", {"schema_hash":"0"*64}, headers, self.browser)[0], 400)
+        status, data, _ = self.request(path, "PUT", {"schema_hash":current_hash}, headers, self.browser)
+        self.assertEqual(status, 200); self.assertEqual(data["schema_hash"], current_hash)
+        self.assertFalse(store.get_tool(name)["drifted"])
+        self.assertEqual(self.request(path, "PUT", {"schema_hash":current_hash}, headers, self.browser)[0], 400)
 
     def test_unknown_agent_and_browser_routes(self):
         self.assertEqual(self.request("/api/agent/missing", "POST", {}, {"Authorization":"Bearer "+"a"*48})[0], 404)
