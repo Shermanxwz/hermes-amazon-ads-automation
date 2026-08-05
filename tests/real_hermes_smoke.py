@@ -101,17 +101,17 @@ def main() -> int:
                 assert entry is not None, f"missing handler for {name}"
 
             status_handler = _entry_handler(registry.get_entry("ads_control_status"))
-            status = json.loads(status_handler(session_id="real-hermes-control"))
+            status = json.loads(status_handler({"session_id":"real-hermes-control"}))
             assert status.get("error") is None, status
             assert status["role"] == "main", status
             assert status["mode"] == "observe", status
 
             note_handler = _entry_handler(registry.get_entry("ads_control_record_note"))
-            note = json.loads(note_handler(
-                message="real Hermes to live control plane smoke",
-                level="info",
-                session_id="real-hermes-control",
-            ))
+            note = json.loads(note_handler({
+                "message":"real Hermes to live control plane smoke",
+                "level":"info",
+                "session_id":"real-hermes-control",
+            }))
             assert note.get("id"), note
             assert any(
                 event.get("message") == "real Hermes to live control plane smoke"
@@ -130,7 +130,7 @@ def main() -> int:
             } if name == fake_tool else original_schema(name))
             try:
                 sync_handler = _entry_handler(registry.get_entry("ads_control_sync_catalog"))
-                synced = json.loads(sync_handler(session_id="real-hermes-control"))
+                synced = json.loads(sync_handler({"session_id":"real-hermes-control"}))
             finally:
                 registry.get_registered_toolset_names = original_toolsets
                 registry.get_tool_names_for_toolset = original_names
