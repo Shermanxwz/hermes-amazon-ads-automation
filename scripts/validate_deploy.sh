@@ -43,6 +43,12 @@ grep -q '^ADS_CONTROL_MAINTENANCE_INTERVAL=' deploy/control.env.example
 grep -q '^ADS_CONTROL_STORAGE_HARD_LIMIT_MB=' deploy/control.env.example
 grep -q '^ADS_CONTROL_OUTBOX_MAX_BYTES=' deploy/control.env.example
 grep -q '^LogRateLimitBurst=' deploy/amazon-ads-control.service
+grep -Fq 'proxy_set_header X-Real-IP $remote_addr;' deploy/nginx.conf
+grep -Fq 'proxy_set_header Origin $http_origin;' deploy/nginx.conf
+if grep -Fq 'proxy_set_header Origin $scheme://$host;' deploy/nginx.conf; then
+  echo "nginx must not synthesize a trusted Origin" >&2
+  exit 1
+fi
 cd "$ROOT"
 if command -v nginx >/dev/null 2>&1; then
   { echo "pid $TMP/nginx.pid;"; echo "error_log $TMP/error.log;"; echo 'events {}'; echo 'http {'; echo "access_log $TMP/access.log;"; echo 'server {'; echo 'listen 8080;'; cat deploy/nginx.conf; echo '}'; echo '}'; } > "$TMP/nginx.conf"
