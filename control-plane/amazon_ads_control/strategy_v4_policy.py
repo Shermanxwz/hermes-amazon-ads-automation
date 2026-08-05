@@ -30,7 +30,7 @@ class StrategyPolicy(CorePolicy):
     posterior_default_aov: Decimal = Decimal("30")
     posterior_reduce_probability: Decimal = Decimal("0.90")
     posterior_scale_probability: Decimal = Decimal("0.80")
-    posterior_min_confidence: Decimal = Decimal("0.45")
+    posterior_min_confidence: Decimal = Decimal("0.30")
     delay_curve: tuple[Decimal, ...] = (
         Decimal("0.58"), Decimal("0.76"), Decimal("0.87"), Decimal("0.93"),
         Decimal("0.97"), Decimal("0.99"), Decimal("1"),
@@ -75,7 +75,7 @@ class StrategyPolicy(CorePolicy):
             "posterior_default_aov": max(Decimal("0.01"), _dec(raw.get("posterior_default_aov"), "30")),
             "posterior_reduce_probability": _clamp(_dec(raw.get("posterior_reduce_probability"), "0.90"), Decimal("0.5"), Decimal("0.999")),
             "posterior_scale_probability": _clamp(_dec(raw.get("posterior_scale_probability"), "0.80"), Decimal("0.5"), Decimal("0.999")),
-            "posterior_min_confidence": _clamp(_dec(raw.get("posterior_min_confidence"), "0.45"), Decimal("0"), Decimal("1")),
+            "posterior_min_confidence": _clamp(_dec(raw.get("posterior_min_confidence"), "0.30"), Decimal("0"), Decimal("1")),
             "delay_curve": tuple(clean),
             "enable_global_budget_allocator": _flag(raw.get("enable_global_budget_allocator"), True),
             "enable_hourly_pacing": _flag(raw.get("enable_hourly_pacing"), True),

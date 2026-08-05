@@ -114,14 +114,20 @@ class AcosPosterior:
         }
 
 
+def _lognormal_parameters(mean: float, sd: float) -> tuple[float, float]:
+    mean = max(mean, 1e-9)
+    cv = _clamp(sd / mean, 0.06, 1.5)
+    sigma2 = math.log1p(cv * cv)
+    return math.log(mean) - sigma2 / 2.0, math.sqrt(sigma2)
+
+
 def _prob_sales_below(threshold: float, mean: float, sd: float) -> float:
     if threshold <= 0:
         return 0.0
     if mean <= 0:
         return 1.0
-    if sd <= 1e-9:
-        return 1.0 if mean < threshold else 0.0
-    return _clamp(normal_cdf((threshold - mean) / sd), 0.0, 1.0)
+    mu, sigma = _lognormal_parameters(mean, sd)
+    return _clamp(normal_cdf((math.log(threshold) - mu) / sigma), 0.0, 1.0)
 
 
 def estimate_acos_posterior(
@@ -142,42 +148,50 @@ def estimate_acos_posterior(
     sales = max(0.0, _f(row.get("sales")))
     spend = max(0.0, _f(row.get("spend")))
 
+    # Reported orders and sales are incomplete until the attribution window
+    # matures. Correct the observed sufficient statistics before combining them
+    # with hierarchical priors; this prevents premature cuts on recent clicks.
+    final_orders_observed = orders / max(maturity, 0.35)
+    final_sales_observed = sales / max(maturity, 0.35)
+
     prior_clicks = max(0.01, cfg.prior_clicks)
     prior_cvr = _clamp(cfg.prior_cvr, 0.0001, 0.9999)
-    alpha0 = prior_clicks * prior_cvr
-    beta0 = prior_clicks * (1.0 - prior_cvr)
-    alpha = alpha0 + orders
-    beta = beta0 + max(0.0, clicks - orders)
+    alpha = prior_clicks * prior_cvr + final_orders_observed
+    beta = prior_clicks * (1.0 - prior_cvr) + max(0.0, clicks - final_orders_observed)
     total = alpha + beta
     cvr_mean = alpha / total
     cvr_var = alpha * beta / (total * total * (total + 1.0))
     cvr_sd = math.sqrt(max(0.0, cvr_var)) * max(0.25, cfg.uncertainty_multiplier)
 
-    observed_aov = sales / orders if orders > 0 and sales > 0 else 0.0
     prior_aov = max(0.01, _f(account_aov, cfg.default_aov))
-    weight = max(0.01, cfg.prior_aov_orders)
-    aov_mean = (prior_aov * weight + observed_aov * orders) / (weight + orders)
-    # A bounded empirical uncertainty proxy. It intentionally remains wider for
-    # zero/small-order entities and narrows as attributed orders accumulate.
-    aov_cv = max(0.08, min(0.75, 0.60 / math.sqrt(max(1.0, weight + orders))))
+    observed_aov = final_sales_observed / final_orders_observed if final_orders_observed > 0 and final_sales_observed > 0 else 0.0
+    aov_weight = max(0.01, cfg.prior_aov_orders)
+    aov_mean = (prior_aov * aov_weight + observed_aov * final_orders_observed) / (aov_weight + final_orders_observed)
+    aov_cv = _clamp(0.55 / math.sqrt(max(1.0, aov_weight + final_orders_observed)), 0.08, 0.55)
     aov_sd = aov_mean * aov_cv * max(0.25, cfg.uncertainty_multiplier)
 
     expected_orders = clicks * cvr_mean
-    expected_sales_raw = expected_orders * aov_mean
-    # Observed conversions are incomplete inside the attribution window. Blend
-    # the model expectation with maturity-corrected observed sales rather than
-    # blindly multiplying the most recent report.
-    maturity_corrected_sales = sales / maturity if sales > 0 else 0.0
-    observed_weight = _clamp((orders + clicks / 20.0) / 12.0, 0.0, 0.8)
-    expected_sales = observed_weight * maturity_corrected_sales + (1.0 - observed_weight) * expected_sales_raw
-    expected_sales = max(0.0, expected_sales)
+    model_sales = expected_orders * aov_mean
+    observed_weight = _clamp(
+        (final_orders_observed + clicks / 20.0) /
+        (aov_weight + final_orders_observed + clicks / 20.0),
+        0.0,
+        0.9,
+    )
+    expected_sales = max(0.0, observed_weight * final_sales_observed + (1.0 - observed_weight) * model_sales)
 
-    revenue_var = (clicks * aov_mean) ** 2 * cvr_var + (expected_orders * aov_sd) ** 2
-    revenue_sd = math.sqrt(max(1e-9, revenue_var)) / max(maturity, 0.35)
+    # Beta-binomial predictive variance includes uncertainty in the CVR itself.
+    order_var = clicks * cvr_mean * (1.0 - cvr_mean) + clicks * max(0, clicks - 1) * cvr_var
+    revenue_var = order_var * aov_mean * aov_mean + expected_orders * aov_sd * aov_sd
+    revenue_sd = math.sqrt(max(1e-9, revenue_var))
+    # Evidence narrows uncertainty gradually but never removes it completely.
+    evidence = clicks + orders * 8.0
+    revenue_sd *= max(0.65, 1.0 - min(0.35, evidence / 300.0))
+
     expected_acos = spend * 100.0 / expected_sales if expected_sales > 1e-9 else None
-
-    revenue_low = max(0.0, expected_sales - 1.645 * revenue_sd)
-    revenue_high = max(0.0, expected_sales + 1.645 * revenue_sd)
+    mu, sigma = _lognormal_parameters(expected_sales, revenue_sd)
+    revenue_low = math.exp(mu - 1.645 * sigma)
+    revenue_high = math.exp(mu + 1.645 * sigma)
     acos_low = spend * 100.0 / revenue_high if revenue_high > 1e-9 else None
     acos_high = spend * 100.0 / revenue_low if revenue_low > 1e-9 else None
 
@@ -186,8 +200,7 @@ def estimate_acos_posterior(
     p_over_target = _prob_sales_below(spend * 100.0 / target, expected_sales, revenue_sd)
     p_over_max = _prob_sales_below(spend * 100.0 / maximum, expected_sales, revenue_sd)
     p_under_target = 1.0 - p_over_target
-    effective_samples = clicks + orders * 8.0
-    confidence = _clamp((1.0 - math.exp(-effective_samples / 28.0)) * maturity, 0.0, 1.0)
+    confidence = _clamp((1.0 - math.exp(-evidence / 28.0)) * maturity, 0.0, 1.0)
 
     return AcosPosterior(
         clicks=clicks,

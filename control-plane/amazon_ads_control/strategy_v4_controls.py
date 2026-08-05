@@ -13,6 +13,7 @@ def _marker(profile: str, policy: StrategyPolicy, purpose: str, state: str) -> d
         "ad_product": "SPONSORED_PRODUCTS", "observed_in_ads": True, "purpose": purpose,
         "desired_state": state, "envelope_hash": envelope_hash(profile, policy)}
 
+
 def lifecycle(snapshot: dict[str, Any], policy: StrategyPolicy, ctx, age: Any) -> list[Decision]:
     rows = snapshot.get("targets")
     if not isinstance(rows, list):
@@ -47,6 +48,12 @@ def lifecycle(snapshot: dict[str, Any], policy: StrategyPolicy, ctx, age: Any) -
 
 
 def global_budget(engine, snapshot: dict[str, Any], policy: StrategyPolicy, ctx, age: Any, decisions: list[Decision]) -> list[Decision]:
+    # A true account allocator requires an explicit account/portfolio boundary.
+    # Without it, retain the mature local Campaign controller rather than infer
+    # a total budget that Amazon Ads reports do not guarantee.
+    account = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else {}
+    if _d(account.get("daily_budget_cap") or account.get("budget_cap")) <= 0:
+        return decisions
     rows, usage_rows = snapshot.get("campaigns"), snapshot.get("budget_usage")
     if not isinstance(rows, list) or len(rows) < 2:
         return decisions
