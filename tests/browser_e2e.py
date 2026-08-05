@@ -148,6 +148,20 @@ def main() -> int:
                 assert page.get_by_text(approval_hash, exact=True).is_visible()
                 assert page.get_by_role("button", name="批准", exact=True).is_visible()
 
+                page.once("dialog", lambda dialog: dialog.dismiss())
+                page.get_by_role("button", name="批准", exact=True).click()
+                page.wait_for_timeout(100)
+                assert store.dashboard()["approvals"]["recent"][0]["status"] == "pending"
+                assert page.get_by_role("button", name="批准", exact=True).is_enabled()
+                assert page.locator("#notice").is_hidden()
+
+                page.once("dialog", lambda dialog: dialog.dismiss())
+                page.get_by_role("button", name="拒绝", exact=True).click()
+                page.wait_for_timeout(100)
+                assert store.dashboard()["approvals"]["recent"][0]["status"] == "pending"
+                assert page.get_by_role("button", name="拒绝", exact=True).is_enabled()
+                assert page.locator("#notice").is_hidden()
+
                 page.get_by_role("button", name="决策", exact=True).click()
                 assert page.locator("#decisions").get_attribute("class") == "tab active"
                 page.get_by_role("button", name="Profiles / MCP").click()
