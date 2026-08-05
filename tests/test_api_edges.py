@@ -59,9 +59,34 @@ class ApiEdgeTests(unittest.TestCase):
             self.assertEqual(r.headers["Cross-Origin-Opener-Policy"], "same-origin")
         status, data, headers = self.request("/health/ready")
         self.assertEqual(status, 200); self.assertTrue(data["database"]["ok"])
+        self.assertTrue(data["service_ready"]); self.assertFalse(data["autopilot_ready"])
+        self.assertFalse(data["checks"]["catalog_loaded"])
         self.assertEqual(headers["Cache-Control"], "no-store")
         status, data, _ = self.request("/static/../README.md")
         self.assertEqual(status, 404); self.assertEqual(data["error"], "not_found")
+
+    def test_autopilot_readiness_requires_live_stable_catalog(self):
+        self.login()
+        headers = {"Origin":"http://127.0.0.1", "X-CSRF-Token":self.csrf}
+        status, _, _ = self.request(
+            "/api/settings", "PUT", {"mode":"autopilot", "execution_enabled":True},
+            headers, self.browser,
+        )
+        self.assertEqual(status, 200)
+        status, data, _ = self.request("/health/ready")
+        self.assertEqual(status, 503); self.assertTrue(data["service_ready"])
+        self.assertTrue(data["autopilot_requested"]); self.assertFalse(data["autopilot_ready"])
+        tool = descriptor_from_payload({
+            "registered_name":"mcp_amazon_ads_campaign_management_query_campaigns",
+            "native_name":"campaign_management-query_campaigns",
+            "source":"hermes-registry:na",
+            "schema":{"description":"Query campaigns", "parameters":{"type":"object","properties":{}}},
+        })
+        self.server.RequestHandlerClass.app.store.sync_catalog([tool])
+        status, data, _ = self.request("/health/ready")
+        self.assertEqual(status, 200); self.assertTrue(data["autopilot_ready"])
+        self.assertTrue(data["checks"]["catalog_loaded"])
+        self.assertTrue(data["checks"]["catalog_drift_clear"])
 
     def test_malformed_http_bodies_fail_closed(self):
         cases = [
