@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from importlib import resources
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 _INSTALLED = False
 
@@ -14,6 +14,7 @@ def install() -> None:
 
     original_get = Handler.do_GET
     original_post = Handler.do_POST
+    original_put = Handler.do_PUT
     original_static = Handler._static
 
     def static(self, filename: str) -> None:
@@ -75,7 +76,60 @@ def install() -> None:
             self.app.store.event("error", "api.closed_loop_error", "controller", None, str(exc), {"path": path})
             self._respond(500, {"error": "internal_error"})
 
+    def do_PUT(self) -> None:
+        path = urlparse(self.path).path
+        if not (path.startswith("/api/catalog/") and path.endswith("/acknowledge")):
+            return original_put(self)
+        try:
+            data = self._body()
+        except ValueError as exc:
+            self._respond(400, {"error": str(exc)})
+            return
+        if not self._require_browser(mutate=True):
+            return
+        tool_name = unquote(path[len("/api/catalog/"):-len("/acknowledge")].strip("/"))
+        expected_hash = str(data.get("schema_hash") or "").strip().lower()
+        if len(expected_hash) != 64 or any(char not in "0123456789abcdef" for char in expected_hash):
+            self._respond(400, {"error": "a full 64-character schema_hash is required"})
+            return
+        try:
+            with self.app.store.connection() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    row = conn.execute(
+                        "SELECT schema_hash,enabled,drifted FROM mcp_tools WHERE registered_name=?",
+                        (tool_name,),
+                    ).fetchone()
+                    if not row or not row["enabled"]:
+                        raise KeyError("enabled MCP tool not found")
+                    if str(row["schema_hash"]).lower() != expected_hash:
+                        raise ValueError("schema hash changed; refresh and review the current schema")
+                    if not row["drifted"]:
+                        raise ValueError("tool has no pending schema drift")
+                    cursor = conn.execute(
+                        "UPDATE mcp_tools SET drifted=0 WHERE registered_name=? AND enabled=1 AND drifted=1 AND lower(schema_hash)=?",
+                        (tool_name, expected_hash),
+                    )
+                    if cursor.rowcount != 1:
+                        raise ValueError("schema drift changed concurrently; refresh and retry")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+            self.app.store.event(
+                "warning", "mcp.catalog.drift_acknowledged", "operator", None,
+                f"Acknowledged schema drift for {tool_name}",
+                {"schema_hash": expected_hash},
+            )
+            self._respond(200, {"ok": True, "schema_hash": expected_hash})
+        except (ValueError, KeyError) as exc:
+            self._respond(400, {"error": str(exc)})
+        except Exception as exc:
+            self.app.store.event("error", "api.put_error", "controller", None, str(exc), {"path": path})
+            self._respond(500, {"error": "internal_error"})
+
     Handler._static = static
     Handler.do_GET = do_GET
     Handler.do_POST = do_POST
+    Handler.do_PUT = do_PUT
     _INSTALLED = True
