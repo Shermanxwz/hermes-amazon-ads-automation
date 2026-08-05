@@ -68,8 +68,17 @@ def exercise(browser_type: BrowserType, root: Path) -> None:
     context = browser.new_context(viewport={"width": 1100, "height": 780})
     page = context.new_page()
     console_errors: list[str] = []
+    expected_fault_errors: list[str] = []
     page_errors: list[str] = []
-    page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+    fault_injection_active = [False]
+
+    def capture_console(message) -> None:
+        if message.type != "error":
+            return
+        target = expected_fault_errors if fault_injection_active[0] else console_errors
+        target.append(message.text)
+
+    page.on("console", capture_console)
     page.on("pageerror", lambda error: page_errors.append(str(error)))
     try:
         response = page.goto(base, wait_until="networkidle")
@@ -83,11 +92,13 @@ def exercise(browser_type: BrowserType, root: Path) -> None:
         page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
         assert page.locator("#execution-pill").inner_text() == "Executor 可写"
 
+        fault_injection_active[0] = True
         page.route("**/api/dashboard", unavailable)
         page.get_by_role("button", name="刷新").click()
         page.locator("#notice:not([hidden])").wait_for()
         assert "simulated_dashboard_unavailable" in page.locator("#notice").inner_text()
         page.unroute("**/api/dashboard", unavailable)
+        fault_injection_active[0] = False
         page.get_by_role("button", name="刷新").click()
         page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
 
