@@ -28,17 +28,19 @@ function bindApprovalActions(){
   $$('.approve-plan').forEach(button=>button.onclick=()=>mutate(button,async()=>{
     const id=button.dataset.id, hash=button.dataset.hash, phrase=`APPROVE ${id} ${hash.slice(0,12)}`;
     const typed=window.prompt(`确认您已核对全部工具、参数、依赖、预期状态和预算暴露。请输入：\n${phrase}`);
-    if(typed===null)return;
+    if(typed===null)return false;
     if(typed!==phrase)throw new Error("确认文本不匹配，未批准");
     await api(`/api/approvals/${encodeURIComponent(id)}/approve`,{method:"POST",body:JSON.stringify({payload_hash:hash,confirmation:typed})});
     await refresh();
+    return true;
   },"精确计划已批准").catch(()=>{}));
   $$('.reject-plan').forEach(button=>button.onclick=()=>mutate(button,async()=>{
     const prompted=window.prompt("请输入拒绝原因");
-    if(prompted===null)return;
+    if(prompted===null)return false;
     const reason=prompted.trim()||"operator rejected";
     await api(`/api/approvals/${encodeURIComponent(button.dataset.id)}/reject`,{method:"POST",body:JSON.stringify({reason})});
     await refresh();
+    return true;
   },"计划已拒绝").catch(()=>{}));
 }
 render=function(){
