@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -80,5 +81,23 @@ class OfficialScriptTests(unittest.TestCase):
             with redirect_stderr(io.StringIO()): self.assertEqual(secrets.main(["--root",str(root)]),1)
             (root/"bad.env").unlink()
             with redirect_stdout(io.StringIO()): self.assertEqual(secrets.main(["--root",str(root)]),0)
+
+    def test_full_sandbox_aggregates_failures_and_requires_browser(self):
+        script=(ROOT/"scripts/run_full_sandbox.sh").read_text(encoding="utf-8")
+        match=re.search(r"run_required\(\) \{(?P<body>.*?)\n\}",script,re.S)
+        self.assertIsNotNone(match)
+        body=match.group("body")
+        self.assertIn("record FAIL",body)
+        self.assertIn("return 0",body)
+        self.assertNotIn('return "$code"',body)
+        self.assertIn('run_required browser "Real Chromium Web and approval E2E"',script)
+        self.assertNotIn("run_external_when_missing browser",script)
+        self.assertIn('sys.exit(1 if overall == "FAIL" else 0)',script)
+
+    def test_nginx_preserves_browser_origin(self):
+        nginx=(ROOT/"deploy/nginx.conf").read_text(encoding="utf-8")
+        self.assertIn("proxy_set_header Origin $http_origin;",nginx)
+        self.assertIn("proxy_set_header X-Real-IP $remote_addr;",nginx)
+        self.assertNotIn("proxy_set_header Origin $scheme://$host;",nginx)
 
 if __name__ == "__main__": unittest.main()
