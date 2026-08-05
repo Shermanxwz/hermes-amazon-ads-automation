@@ -33,13 +33,13 @@ run_required amazon_mcp "Official Amazon Ads MCP endpoint reachability" python3 
 run_required recovery "Concurrency, recovery, HTTP and SQLite stress" python3 "$ROOT/tests/stress_recovery.py"
 
 if command -v coverage >/dev/null 2>&1; then run_required quality "Branch coverage gate" bash "$ROOT/scripts/coverage.sh"; else record EXTERNAL quality "Branch coverage gate" "coverage package is not installed"; fi
-if command -v ruff >/dev/null 2>&1 && command -v bandit >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then run_required quality "Ruff, Bandit, JavaScript and secret checks" bash "$ROOT/scripts/quality.sh"; else record EXTERNAL quality "Ruff, Bandit, JavaScript and secret checks" "ruff, bandit and Node.js are required"; fi
-if command -v nginx >/dev/null 2>&1; then run_required deployment "Wheel, fresh install, systemd and Nginx validation" bash "$ROOT/scripts/validate_deploy.sh"; else record EXTERNAL deployment "Wheel, fresh install, systemd and Nginx validation" "nginx is not installed"; fi
+if command -v ruff >/dev/null 2>&1 && command -v bandit >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then run_required quality "Ruff, Bandit, JavaScript and secret checks" env PYTHONWARNINGS=default bash "$ROOT/scripts/quality.sh"; else record EXTERNAL quality "Ruff, Bandit, JavaScript and secret checks" "ruff, bandit and Node.js are required"; fi
+if command -v nginx >/dev/null 2>&1; then run_required deployment "Wheel, fresh install, systemd and Nginx validation" env PYTHONWARNINGS=default bash "$ROOT/scripts/validate_deploy.sh"; else record EXTERNAL deployment "Wheel, fresh install, systemd and Nginx validation" "nginx is not installed"; fi
 if python3 -c 'import playwright' >/dev/null 2>&1; then
   run_required browser "Real Chromium Web and approval E2E" python3 "$ROOT/tests/browser_e2e.py"
   run_required browser "Chromium/Firefox/WebKit matrix E2E" python3 "$ROOT/tests/browser_matrix_e2e.py"
 else record EXTERNAL browser "Browser E2E" "playwright is not installed"; fi
-if python3 -c 'import hermes_cli' >/dev/null 2>&1; then run_required hermes "Pinned real Hermes plugin-manager load" python3 "$ROOT/tests/real_hermes_smoke.py"; else record EXTERNAL hermes "Pinned real Hermes plugin-manager load" "Hermes source/package is not installed"; fi
+if python3 -c 'import hermes_cli' >/dev/null 2>&1; then run_required hermes "Pinned real Hermes plugin-manager load" env PYTHONWARNINGS=default python3 "$ROOT/tests/real_hermes_smoke.py"; else record EXTERNAL hermes "Pinned real Hermes plugin-manager load" "Hermes source/package is not installed"; fi
 
 if [[ "${FULL_SANDBOX_LIVE_MCP:-0}" == "1" ]]; then
   if [[ -n "${AMAZON_ADS_MCP_ACCESS_TOKEN:-}" ]]; then run_required amazon_live "Authenticated live MCP initialize and complete tools/list" python3 "$ROOT/scripts/check_amazon_mcp_contract.py" --check --output "$ARTIFACT_DIR/mcp-live-manifest.json"; else record FAIL amazon_live "Authenticated live MCP initialize and complete tools/list" "FULL_SANDBOX_LIVE_MCP=1 requires AMAZON_ADS_MCP_ACCESS_TOKEN"; fi
