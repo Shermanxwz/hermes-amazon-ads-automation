@@ -135,14 +135,15 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install coverage==7.13.3 ruff==0.12.11 bandit==1.8.6 playwright==1.57.0
       - run: python -m playwright install --with-deps chromium firefox webkit
-      - uses: actions/checkout@v6
-        with: {repository: NousResearch/hermes-agent, ref: v2026.8.3, path: .ci-hermes-agent, persist-credentials: false}
-      - name: Install pinned Hermes and remove foreign source tree
+      - name: Install pinned Hermes outside project source tree
         shell: bash
         run: |
-          python -m pip install .ci-hermes-agent
+          HERMES_SOURCE="$RUNNER_TEMP/hermes-agent-v2026.8.3"
+          rm -rf "$HERMES_SOURCE"
+          git clone --depth 1 --branch v2026.8.3 \
+            https://github.com/NousResearch/hermes-agent.git "$HERMES_SOURCE"
+          python -m pip install -e "$HERMES_SOURCE"
           python -c 'import hermes_cli'
-          rm -rf .ci-hermes-agent
           test ! -e .ci-hermes-agent
       - run: bash scripts/run_full_sandbox.sh
         env: {FULL_SANDBOX_ARTIFACT_DIR: "${{ github.workspace }}/artifacts/sealed-v4"}
