@@ -91,6 +91,18 @@ class HttpV2Tests(unittest.TestCase):
         self.assertEqual(status,429); self.assertEqual(data["error"],"login_rate_limited"); self.assertIn("Retry-After",headers)
         self.assertEqual(self.request("/api/login","POST",{"password":self.password})[0],429)
 
+    def test_one_proxy_client_cannot_lock_out_another_client(self):
+        blocked_headers={"X-Forwarded-For":"203.0.113.10"}
+        for _ in range(4):
+            self.assertEqual(self.request("/api/login","POST",{"password":"wrong"},blocked_headers)[0],401)
+        self.assertEqual(self.request("/api/login","POST",{"password":"wrong"},blocked_headers)[0],429)
+        status,data,_=self.request(
+            "/api/login","POST",{"password":self.password},
+            {"X-Forwarded-For":"203.0.113.11"},self.browser,
+        )
+        self.assertEqual(status,200)
+        self.assertIn("csrf",data)
+
     def test_agent_token_and_size(self):
         self.assertEqual(self.request("/api/agent/context")[0],401)
         status,data,_=self.request("/api/agent/context?session_id=x",headers={"Authorization":"Bearer "+"a"*48}); self.assertEqual(status,200); self.assertEqual(data["role"],"main")
