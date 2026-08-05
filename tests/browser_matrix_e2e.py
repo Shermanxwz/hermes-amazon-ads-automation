@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import threading
+import traceback
 
 from playwright.sync_api import BrowserType, Route, sync_playwright
 
@@ -38,10 +39,13 @@ def unavailable(route: Route) -> None:
 
 
 def exercise(browser_type: BrowserType, root: Path) -> None:
+    browser_name = browser_type.name
+    stage = "settings"
+    print(f"browser-matrix: {browser_name}: {stage}", flush=True)
     settings = Settings(
         host="127.0.0.1",
         port=0,
-        db_path=root / f"{browser_type.name}.db",
+        db_path=root / f"{browser_name}.db",
         public_origin="",
         control_password_hash=hash_password(PASSWORD),
         agent_token="a" * 48,
@@ -64,34 +68,44 @@ def exercise(browser_type: BrowserType, root: Path) -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
-    browser = browser_type.launch(headless=True)
-    context = browser.new_context(viewport={"width": 1100, "height": 780})
-    page = context.new_page()
+    browser = None
     console_errors: list[str] = []
     expected_fault_errors: list[str] = []
     page_errors: list[str] = []
     fault_injection_active = [False]
-
-    def capture_console(message) -> None:
-        if message.type != "error":
-            return
-        target = expected_fault_errors if fault_injection_active[0] else console_errors
-        target.append(message.text)
-
-    page.on("console", capture_console)
-    page.on("pageerror", lambda error: page_errors.append(str(error)))
     try:
-        response = page.goto(base, wait_until="networkidle")
+        stage = "launch"
+        print(f"browser-matrix: {browser_name}: {stage}", flush=True)
+        browser = browser_type.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1100, "height": 780})
+        page = context.new_page()
+
+        def capture_console(message) -> None:
+            if message.type != "error":
+                return
+            target = expected_fault_errors if fault_injection_active[0] else console_errors
+            target.append(message.text)
+
+        page.on("console", capture_console)
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+
+        stage = "initial-load"
+        print(f"browser-matrix: {browser_name}: {stage}", flush=True)
+        response = page.goto(base, wait_until="domcontentloaded")
         assert response and response.ok
         page.get_by_placeholder("控制台密码").fill(PASSWORD)
         page.get_by_role("button", name="登录").click()
         page.wait_for_selector("#app:not([hidden])")
         page.locator("#readiness-pill").filter(has_text="READY").wait_for()
 
+        stage = "autopilot"
+        print(f"browser-matrix: {browser_name}: {stage}", flush=True)
         page.get_by_role("button", name="自动运营").click()
         page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
         assert page.locator("#execution-pill").inner_text() == "Executor 可写"
 
+        stage = "fault-injection"
+        print(f"browser-matrix: {browser_name}: {stage}", flush=True)
         fault_injection_active[0] = True
         page.route("**/api/dashboard", unavailable)
         page.get_by_role("button", name="刷新").click()
@@ -101,20 +115,33 @@ def exercise(browser_type: BrowserType, root: Path) -> None:
         )
         assert "simulated_dashboard_unavailable" in page.locator("#notice").inner_text()
         page.unroute("**/api/dashboard", unavailable)
+        page.wait_for_timeout(50)
         fault_injection_active[0] = False
+
+        stage = "fault-recovery"
+        print(f"browser-matrix: {browser_name}: {stage}", flush=True)
         page.get_by_role("button", name="刷新").click()
         page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
 
+        stage = "session-expiry"
+        print(f"browser-matrix: {browser_name}: {stage}", flush=True)
         context.clear_cookies()
-        page.reload(wait_until="networkidle")
+        page.reload(wait_until="domcontentloaded")
         page.wait_for_selector("#login:not([hidden])")
+        page.wait_for_timeout(50)
+    except Exception:
+        print(f"browser-matrix: {browser_name}: FAILED at {stage}", flush=True)
+        traceback.print_exc()
+        raise
     finally:
-        browser.close()
+        if browser is not None:
+            browser.close()
         server.shutdown()
         server.server_close()
         thread.join()
-    assert not console_errors, f"{browser_type.name} console errors: {console_errors}"
-    assert not page_errors, f"{browser_type.name} page errors: {page_errors}"
+    assert not console_errors, f"{browser_name} console errors: {console_errors}"
+    assert not page_errors, f"{browser_name} page errors: {page_errors}"
+    print(f"browser-matrix: {browser_name}: PASS", flush=True)
 
 
 def main() -> int:
