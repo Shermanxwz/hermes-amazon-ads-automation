@@ -9,6 +9,7 @@ from .strategy_v4_policy import StrategyPolicy
 
 REDUCE = {"ADS-TARGET-WASTE", "ADS-TARGET-OVER-ACOS", "ADS-BUDGET-CONTAIN-LOSS", "ADS-PLACEMENT-REDUCE", "ADS-SEARCH-NEGATIVE"}
 SCALE = {"ADS-TARGET-SCALE", "ADS-BUDGET-PACING-WINNER", "ADS-PLACEMENT-TOS-SCALE", "ADS-PLACEMENT-SCALE", "ADS-SEARCH-HARVEST"}
+BUDGET_SCALE = {"ADS-BUDGET-PACING-WINNER"}
 
 
 def context(snapshot: dict[str, Any], policy: StrategyPolicy):
@@ -71,11 +72,21 @@ def gate(decisions: list[Decision], snapshot: dict[str, Any], policy: StrategyPo
         if item.rule_id in REDUCE:
             ok = post.p_acos_over_max >= float(policy.posterior_reduce_probability) and post.confidence >= float(policy.posterior_min_confidence)
         elif item.rule_id in SCALE:
-            ok = post.p_acos_under_target >= float(policy.posterior_scale_probability) and post.confidence >= float(policy.posterior_min_confidence)
+            threshold = (
+                float(policy.posterior_budget_scale_probability)
+                if item.rule_id in BUDGET_SCALE
+                else float(policy.posterior_scale_probability)
+            )
+            ok = post.p_acos_under_target >= threshold and post.confidence >= float(policy.posterior_min_confidence)
         if ok:
             kept.append(item)
         else:
-            suppressed.append({"plan_key": item.plan_key, "rule_id": item.rule_id, "entity_id": item.entity_id})
+            suppressed.append({
+                "plan_key": item.plan_key,
+                "rule_id": item.rule_id,
+                "entity_id": item.entity_id,
+                "p_required": threshold if item.rule_id in SCALE else float(policy.posterior_reduce_probability),
+            })
     return kept, suppressed, (delay, cfg, aov)
 
 
