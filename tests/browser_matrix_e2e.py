@@ -95,7 +95,10 @@ def exercise(browser_type: BrowserType, root: Path) -> None:
         fault_injection_active[0] = True
         page.route("**/api/dashboard", unavailable)
         page.get_by_role("button", name="刷新").click()
-        page.locator("#notice:not([hidden])").wait_for()
+        page.wait_for_function(
+            "document.querySelector('#notice') && "
+            "document.querySelector('#notice').textContent.includes('simulated_dashboard_unavailable')"
+        )
         assert "simulated_dashboard_unavailable" in page.locator("#notice").inner_text()
         page.unroute("**/api/dashboard", unavailable)
         fault_injection_active[0] = False
