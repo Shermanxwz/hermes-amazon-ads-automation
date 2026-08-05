@@ -75,6 +75,10 @@ class OfficialScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); (root/"safe.py").write_text('access_token="example"')
             (root/"binary.bin").write_bytes(b"\xff\xfe")
+            external=root/".ci-hermes-agent"; external.mkdir()
+            (external/"foreign.env").write_text("authorization: bearer " + "f"*32)
+            artifacts=root/"artifacts"; artifacts.mkdir()
+            (artifacts/"report.txt").write_text("authorization: bearer " + "a"*32)
             self.assertEqual(secrets.scan(root),[])
             (root/"bad.env").write_text("authorization: bearer " + "abcdefghijklmnopqrstuvwxyz" + "123456")
             hits=secrets.scan(root); self.assertEqual(hits[0][0],Path("bad.env"))
@@ -93,6 +97,7 @@ class OfficialScriptTests(unittest.TestCase):
         self.assertIn('run_required browser "Real Chromium Web and approval E2E"',script)
         self.assertNotIn("run_external_when_missing browser",script)
         self.assertIn('sys.exit(1 if overall == "FAIL" else 0)',script)
+        self.assertIn("PYTHONWARNINGS=default",script)
 
     def test_nginx_preserves_browser_origin(self):
         nginx=(ROOT/"deploy/nginx.conf").read_text(encoding="utf-8")
