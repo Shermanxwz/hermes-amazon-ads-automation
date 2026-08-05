@@ -16,7 +16,7 @@ class PatchCompositionTests(unittest.TestCase):
         )
         self.assertEqual(
             ControlService._guardrail_check.__module__,
-            "amazon_ads_control.regional_mcp",
+            "amazon_ads_control.sealed_autonomy",
         )
         self.assertEqual(
             ControlService.verify_decision.__module__,
