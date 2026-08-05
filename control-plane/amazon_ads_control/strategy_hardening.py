@@ -6,6 +6,7 @@ from .strategy_core import PLACEMENTS
 from .strategy_gold import OptimizationEngine
 
 _INSTALLED = False
+ROUTINE_AUTO_WRITE_PRODUCTS = {"SPONSORED_PRODUCTS"}
 
 ROW_REQUIREMENTS: dict[str, tuple[tuple[str, ...], ...]] = {
     "targets": (
@@ -50,11 +51,15 @@ def install() -> None:
         for metric in ("impressions", "clicks", "spend", "sales", "orders"):
             if metric not in account or account.get(metric) in (None, ""):
                 unsafe.add(f"missing_account_{metric}")
-        allowed_products = {
+        configured_products = {
             str(item).upper() for item in getattr(policy, "auto_write_ad_products", (
                 "SPONSORED_PRODUCTS",
             ))
         }
+        # Routine optimizer decisions are deliberately narrower than the full
+        # project capability surface. SB/SD/STV writes require an exact
+        # payload-bound operator approval path, not a settings toggle.
+        allowed_products = configured_products & ROUTINE_AUTO_WRITE_PRODUCTS
         valid_placements = set(PLACEMENTS.values())
         rejected = result.setdefault("rejected_rows", {})
         for level, requirements in ROW_REQUIREMENTS.items():
@@ -84,6 +89,7 @@ def install() -> None:
         result["missing_or_unsafe"] = sorted(unsafe)
         result["warnings"] = sorted(warnings)
         result["eligible_for_writes"] = not unsafe
+        result["configured_auto_write_ad_products"] = sorted(configured_products)
         result["auto_write_ad_products"] = sorted(allowed_products)
         return result
 
