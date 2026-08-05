@@ -35,6 +35,45 @@ def install() -> None:
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/health/ready":
+            self.app.store.reconcile_expired_reservations()
+            integrity = self.app.store.integrity_check()
+            dashboard = self.app.store.dashboard()
+            settings = dashboard.get("settings") if isinstance(dashboard.get("settings"), dict) else {}
+            catalog = dashboard.get("catalog") if isinstance(dashboard.get("catalog"), dict) else {}
+            storage = dashboard.get("storage") if isinstance(dashboard.get("storage"), dict) else {}
+            maintenance = storage.get("latest_maintenance") if isinstance(storage.get("latest_maintenance"), dict) else {}
+            runtime = dashboard.get("runtime_status") if isinstance(dashboard.get("runtime_status"), list) else []
+            plugin = next((item for item in runtime if item.get("component") == "hermes-plugin"), None)
+            plugin_state = plugin.get("state") if isinstance(plugin, dict) and isinstance(plugin.get("state"), dict) else {}
+            outbox = plugin_state.get("result_outbox") if isinstance(plugin_state.get("result_outbox"), dict) else {}
+            checks = {
+                "database_integrity": bool(integrity.get("ok")),
+                "catalog_loaded": int(catalog.get("tools") or 0) > 0,
+                "catalog_drift_clear": int(catalog.get("drifted") or 0) == 0,
+                "storage_below_hard_limit": str(maintenance.get("pressure") or "normal") != "hard",
+                "result_outbox_below_limit": not bool(outbox.get("over_limit")),
+            }
+            mode = str(settings.get("mode") or "observe")
+            execution_enabled = bool(settings.get("execution_enabled"))
+            autopilot_requested = mode == "autopilot"
+            autopilot_ready = all(checks.values()) and execution_enabled
+            service_ready = checks["database_integrity"]
+            status = 200 if service_ready and (not autopilot_requested or autopilot_ready) else 503
+            self._respond(status, {
+                "ok": service_ready,
+                "service_ready": service_ready,
+                "autopilot_ready": autopilot_ready,
+                "autopilot_requested": autopilot_requested,
+                "checks": checks,
+                "database": integrity,
+                "mode": mode,
+                "execution_enabled": execution_enabled,
+                "catalog": catalog,
+                "pending_callbacks": int(dashboard.get("pending_callbacks") or 0),
+                "hermes_plugin_last_seen": plugin.get("updated_at") if isinstance(plugin, dict) else None,
+            })
+            return
         if parsed.path != "/api/reports":
             return original_get(self)
         if not self._require_browser():
