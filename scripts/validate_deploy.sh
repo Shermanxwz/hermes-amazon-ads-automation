@@ -14,10 +14,11 @@ else
 fi
 python3 -m venv "$TMP/installed"
 "$TMP/installed/bin/pip" install --no-deps "$TMP"/dist/*.whl >/dev/null
+EXPECTED_VERSION="$("$TMP/installed/bin/python" -c 'import amazon_ads_control; print(amazon_ads_control.__version__)')"
 "$TMP/installed/bin/amazon-ads-control" --help >/dev/null
-[[ "$("$TMP/installed/bin/amazon-ads-control" --version)" == *"3.2.0" ]]
+[[ "$("$TMP/installed/bin/amazon-ads-control" --version)" == *"$EXPECTED_VERSION"* ]]
 "$TMP/installed/bin/amazon-ads-worker" --help >/dev/null
-[[ "$("$TMP/installed/bin/amazon-ads-worker" --version)" == *"3.2.0" ]]
+[[ "$("$TMP/installed/bin/amazon-ads-worker" --version)" == *"$EXPECTED_VERSION"* ]]
 "$TMP/installed/bin/amazon-ads-backtest" --help >/dev/null
 export ADS_CONTROL_HOST=127.0.0.1 ADS_CONTROL_PORT=8790 ADS_CONTROL_DB="$TMP/state.db"
 export ADS_CONTROL_AGENT_TOKEN="$(python3 -c 'print("x"*48)')"

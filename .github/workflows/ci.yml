@@ -83,18 +83,24 @@ jobs:
   real-hermes:
     name: real Hermes PluginManager (${{ matrix.hermes }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        hermes: ["0.18.2", "0.19.0", "0.20.0"]
+        include:
+          - hermes: "0.18.2"
+            install_spec: "hermes-agent==0.18.2"
+          - hermes: "0.19.0"
+            install_spec: "hermes-agent==0.19.0"
+          - hermes: "0.20.0 (v2026.8.3)"
+            install_spec: "hermes-agent @ https://github.com/NousResearch/hermes-agent/archive/refs/tags/v2026.8.3.tar.gz"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install "hermes-agent==${{ matrix.hermes }}"
+      - run: python -m pip install "${{ matrix.install_spec }}"
       - run: PYTHONPATH="$PWD/control-plane" python tests/real_hermes_smoke.py
 
   amazon-official-contract:

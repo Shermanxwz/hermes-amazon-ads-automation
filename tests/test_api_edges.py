@@ -82,11 +82,24 @@ class ApiEdgeTests(unittest.TestCase):
             "source":"hermes-registry:na",
             "schema":{"description":"Query campaigns", "parameters":{"type":"object","properties":{}}},
         })
-        self.server.RequestHandlerClass.app.store.sync_catalog([tool])
+        store = self.server.RequestHandlerClass.app.store
+        store.sync_catalog([tool])
+        status, data, _ = self.request("/health/ready")
+        self.assertEqual(status, 503)
+        self.assertIn("hermes_plugin_present", data["blocking_checks"])
+        store.record_runtime_status(
+            "hermes-plugin",
+            {
+                "readiness_protocol": 1,
+                "result_outbox": {"pending": 0, "bytes": 0, "over_limit": False},
+                "catalog_sync": {"ok": True, "tool_count": 1},
+            },
+        )
         status, data, _ = self.request("/health/ready")
         self.assertEqual(status, 200); self.assertTrue(data["autopilot_ready"])
         self.assertTrue(data["checks"]["catalog_loaded"])
         self.assertTrue(data["checks"]["catalog_drift_clear"])
+        self.assertTrue(data["checks"]["hermes_plugin_heartbeat_fresh"])
 
     def test_malformed_http_bodies_fail_closed(self):
         cases = [

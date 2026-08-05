@@ -24,7 +24,7 @@ class ApiRuntimeReadinessTests(unittest.TestCase):
             port=0,
             db_path=Path(self.temp.name) / "state.db",
             public_origin="",
-            control_password_hash=hash_password("test password"),
+            control_password_hash=hash_password("test password long enough"),
             agent_token="a" * 48,
             session_ttl_seconds=3600,
             max_sessions=8,

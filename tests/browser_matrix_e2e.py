@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 
-from playwright.sync_api import BrowserType, sync_playwright
+from playwright.sync_api import BrowserType, Route, sync_playwright
 
 from amazon_ads_control.api import build_server
 from amazon_ads_control.catalog import descriptor_from_payload
@@ -27,6 +27,14 @@ TOOL = {
         },
     },
 }
+
+
+def unavailable(route: Route) -> None:
+    route.fulfill(
+        status=503,
+        content_type="application/json",
+        body='{"error":"simulated_dashboard_unavailable"}',
+    )
 
 
 def exercise(browser_type: BrowserType, root: Path) -> None:
@@ -75,10 +83,11 @@ def exercise(browser_type: BrowserType, root: Path) -> None:
         page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
         assert page.locator("#execution-pill").inner_text() == "Executor 可写"
 
-        page.route("**/api/dashboard", lambda route: route.abort())
+        page.route("**/api/dashboard", unavailable)
         page.get_by_role("button", name="刷新").click()
         page.locator("#notice:not([hidden])").wait_for()
-        page.unroute("**/api/dashboard")
+        assert "simulated_dashboard_unavailable" in page.locator("#notice").inner_text()
+        page.unroute("**/api/dashboard", unavailable)
         page.get_by_role("button", name="刷新").click()
         page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
 

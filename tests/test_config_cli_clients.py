@@ -76,7 +76,7 @@ class ConfigTests(unittest.TestCase):
                 Settings.from_env().validate_runtime()
 
     def test_server_help_version_and_check(self):
-        self.assertEqual(__version__, "3.2.0")
+        self.assertEqual(__version__, "3.3.0")
         with self.assertRaises(SystemExit) as ctx, redirect_stdout(io.StringIO()): server_module.main(["--help"])
         self.assertEqual(ctx.exception.code, 0)
         with tempfile.TemporaryDirectory() as td:

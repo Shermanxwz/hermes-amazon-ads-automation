@@ -83,6 +83,14 @@ class ProcessE2EV2Tests(unittest.TestCase):
                 else:
                     self.fail("server did not start")
                 self.assertEqual(self.request(base,"/api/agent/catalog-sync","POST",{"tools":[READ_CAMPAIGN,READ_TARGET,WRITE_TARGET,REPORT_CREATE]})[0],200)
+                self.assertEqual(self.request(base,"/api/agent/runtime-status","POST",{
+                    "component":"hermes-plugin",
+                    "state":{
+                        "readiness_protocol":1,
+                        "result_outbox":{"pending":0,"bytes":0,"over_limit":False},
+                        "catalog_sync":{"ok":True,"tool_count":4},
+                    },
+                })[0],200)
                 jar=CookieJar(); browser=build_opener(HTTPCookieProcessor(jar))
                 login=Request(base+"/api/login",data=json.dumps({"password":"correct horse battery staple"}).encode(),method="POST",headers={"Content-Type":"application/json"})
                 with browser.open(login) as response:
