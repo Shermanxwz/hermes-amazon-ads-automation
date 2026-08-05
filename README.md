@@ -96,7 +96,7 @@ Profile 策略一旦变化，待执行 Decision 的包络 Hash 失效并自动�
 
 ## 部署
 
-目标环境：2C2G Linux VPS，Executor 与 Verifier 顺序运行。
+目标环境：2C2G Linux VPS，Executor 与 Verifier 顺序运行。标准流程同时是项目的 **Hermes environment install** 路径：
 
 ```bash
 bash scripts/install.sh
