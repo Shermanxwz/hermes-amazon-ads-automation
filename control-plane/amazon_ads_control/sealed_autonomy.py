@@ -19,7 +19,8 @@ def _configure_settings() -> None:
         "auto_write_ad_products": ["SPONSORED_PRODUCTS"], "posterior_prior_clicks": 24,
         "posterior_prior_cvr_pct": 8, "posterior_prior_aov_orders": 3,
         "posterior_default_aov": 30, "posterior_reduce_probability": 0.90,
-        "posterior_scale_probability": 0.80, "posterior_min_confidence": 0.30,
+        "posterior_scale_probability": 0.80, "posterior_budget_scale_probability": 0.60,
+        "posterior_min_confidence": 0.30,
         "enable_global_budget_allocator": True, "enable_hourly_pacing": True,
         "hourly_max_bid_change_pct": 8,
     })
@@ -30,14 +31,14 @@ def _configure_settings() -> None:
     db.NUMERIC_SETTING_RANGES.update({"sealed_sp_max_campaign_budget": (1, 1000000),
         "sealed_sp_max_new_budget_per_day": (1, 1000000000), "posterior_prior_cvr_pct": (0.01, 95),
         "posterior_default_aov": (0.01, 1000000), "posterior_reduce_probability": (0.5, 0.999),
-        "posterior_scale_probability": (0.5, 0.999), "posterior_min_confidence": (0, 1),
-        "hourly_max_bid_change_pct": (1, 15)})
+        "posterior_scale_probability": (0.5, 0.999), "posterior_budget_scale_probability": (0.5, 0.95),
+        "posterior_min_confidence": (0, 1), "hourly_max_bid_change_pct": (1, 15)})
     db.STRATEGY_SETTING_KEYS.update({"sealed_sp_autonomy_enabled", "sealed_sp_allow_all_observed_asins",
         "sealed_sp_namespace", "sealed_sp_max_campaign_budget", "sealed_sp_max_new_budget_per_day",
         "sealed_sp_max_campaign_creates_per_day", "posterior_prior_clicks", "posterior_prior_cvr_pct",
         "posterior_prior_aov_orders", "posterior_default_aov", "posterior_reduce_probability",
-        "posterior_scale_probability", "posterior_min_confidence", "enable_global_budget_allocator",
-        "enable_hourly_pacing", "hourly_max_bid_change_pct"})
+        "posterior_scale_probability", "posterior_budget_scale_probability", "posterior_min_confidence",
+        "enable_global_budget_allocator", "enable_hourly_pacing", "hourly_max_bid_change_pct"})
     db.SAFETY_LOCKED_SETTINGS.update({"sealed_sp_product_scope": "SPONSORED_PRODUCTS",
         "sealed_sp_permanent_delete_block": True, "sealed_sp_require_paused_create": True,
         "sealed_sp_require_independent_verification": True})
