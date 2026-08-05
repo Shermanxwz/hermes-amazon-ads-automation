@@ -4,7 +4,7 @@ const modeHelp={autopilot:"自动运营：Main 自动分析并建计划；Execut
 const roleLabel=v=>({main:"Main 主控",executor:"Executor 执行器",verifier:"Verifier 验证器"}[v]||v||"—");
 let noticeTimer=0;
 function showNotice(message,kind="error"){const n=$("#notice");if(!n)return;n.textContent=message;n.className=`notice ${kind}`;n.hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>n.hidden=true,6000)}
-async function mutate(button,work,success){const buttons=$$("button");buttons.forEach(x=>x.disabled=true);try{await work();if(success)showNotice(success,"success")}catch(err){showNotice(err.message||String(err));throw err}finally{buttons.forEach(x=>x.disabled=false)}}
+async function mutate(button,work,success){const buttons=$$("button");buttons.forEach(x=>x.disabled=true);try{const result=await work();if(success&&result!==false)showNotice(success,"success");return result}catch(err){showNotice(err.message||String(err));throw err}finally{buttons.forEach(x=>x.disabled=false)}}
 const esc=v=>String(v??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt=v=>v===null||v===undefined?"—":Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{maximumFractionDigits:2}):esc(v);
 const badge=(v,kind="")=>`<span class="badge ${kind}">${esc(v)}</span>`;
