@@ -29,8 +29,10 @@ run_required() {
   else
     local code=$?
     record FAIL "$layer" "$name" "exit=$code"
-    return "$code"
   fi
+  # Required checks are aggregated. The report generator below owns the final
+  # non-zero exit so every layer runs and report.json/report.md are produced.
+  return 0
 }
 
 run_external_when_missing() {
@@ -90,8 +92,7 @@ else
 fi
 
 if python3 -c 'import playwright' >/dev/null 2>&1; then
-  run_external_when_missing browser "Real Chromium Web and approval E2E" \
-    "Playwright Chromium must be installed" \
+  run_required browser "Real Chromium Web and approval E2E" \
     python3 "$ROOT/tests/browser_e2e.py"
 else
   record EXTERNAL browser "Real Chromium Web and approval E2E" "playwright is not installed"
