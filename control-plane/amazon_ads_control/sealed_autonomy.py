@@ -19,7 +19,7 @@ def _configure_settings() -> None:
         "auto_write_ad_products": ["SPONSORED_PRODUCTS"], "posterior_prior_clicks": 24,
         "posterior_prior_cvr_pct": 8, "posterior_prior_aov_orders": 3,
         "posterior_default_aov": 30, "posterior_reduce_probability": 0.90,
-        "posterior_scale_probability": 0.80, "posterior_min_confidence": 0.45,
+        "posterior_scale_probability": 0.80, "posterior_min_confidence": 0.30,
         "enable_global_budget_allocator": True, "enable_hourly_pacing": True,
         "hourly_max_bid_change_pct": 8,
     })
