@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 import json
 import mimetypes
 from importlib import resources
@@ -24,6 +25,7 @@ class App:
     service: ControlService
     sessions: SessionStore
     login_limiter: LoginRateLimiter
+    global_login_limiter: LoginRateLimiter
 
 
 def _json_bytes(data: Any) -> bytes:
@@ -109,6 +111,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def _browser_session(self):
         return self.app.sessions.validate(self._cookie_sid())
+
+    def _login_key(self) -> str:
+        peer = str(self.client_address[0] or "").strip()
+        # Forwarded addresses are trusted only from the loopback reverse proxy.
+        # Directly exposed deployments cannot spoof their way into another key.
+        if peer in {"127.0.0.1", "::1"}:
+            forwarded = str(self.headers.get("X-Forwarded-For") or "").split(",", 1)[0].strip()
+            if forwarded:
+                try:
+                    peer = ipaddress.ip_address(forwarded).compressed
+                except ValueError:
+                    pass
+        try:
+            peer = ipaddress.ip_address(peer).compressed
+        except ValueError:
+            peer = "unknown"
+        return f"ip:{peer}"
 
     def _require_browser(self, mutate: bool = False) -> bool:
         session = self._browser_session()
@@ -211,14 +230,22 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             if path == "/api/login":
-                login_key = "dashboard"
-                permitted, retry_after = self.app.login_limiter.allowed(login_key)
-                if not permitted:
+                login_key = self._login_key()
+                local_allowed, local_retry = self.app.login_limiter.allowed(login_key)
+                global_allowed, global_retry = self.app.global_login_limiter.allowed("dashboard-global")
+                if not local_allowed or not global_allowed:
+                    retry_after = max(local_retry, global_retry, 1)
                     self._respond(429, {"error": "login_rate_limited", "retry_after": retry_after}, {"Retry-After": str(retry_after)})
                     return
                 if not verify_password(str(data.get("password", "")), self.app.settings.control_password_hash):
-                    permitted, retry_after = self.app.login_limiter.failure(login_key)
-                    self.app.store.event("warning", "auth.failed", "browser", None, "Dashboard login failed", {"rate_limited": not permitted})
+                    local_allowed, local_retry = self.app.login_limiter.failure(login_key)
+                    global_allowed, global_retry = self.app.global_login_limiter.failure("dashboard-global")
+                    permitted = local_allowed and global_allowed
+                    retry_after = max(local_retry, global_retry)
+                    self.app.store.event("warning", "auth.failed", "browser", None, "Dashboard login failed", {
+                        "rate_limited": not permitted,
+                        "scope": "client" if not local_allowed else "global" if not global_allowed else "none",
+                    })
                     headers = {"Retry-After": str(retry_after)} if not permitted else None
                     self._respond(429 if not permitted else 401, {"error": "login_rate_limited" if not permitted else "invalid_credentials", "retry_after": retry_after}, headers)
                     return
@@ -309,6 +336,7 @@ def build_server(settings: Settings, store: Store | None = None) -> ThreadingHTT
     store = store or Store(settings.db_path)
     app = App(settings=settings, store=store, service=ControlService(store),
               sessions=SessionStore(settings.session_ttl_seconds, settings.max_sessions),
-              login_limiter=LoginRateLimiter())
+              login_limiter=LoginRateLimiter(),
+              global_login_limiter=LoginRateLimiter(max_failures=50, window_seconds=300, block_seconds=900))
     handler = type("ConfiguredHandler", (Handler,), {"app": app})
     return AdsThreadingHTTPServer((settings.host, settings.port), handler)
