@@ -23,7 +23,7 @@ export PYTHONWARNINGS=error
 
 run_required repository "Compile all Python sources" python3 -m compileall -q "$ROOT/control-plane" "$ROOT/hermes-plugin" "$ROOT/scripts" "$ROOT/integrations" "$ROOT/tests"
 run_required repository "Unit and integration suite" bash "$ROOT/scripts/validate.sh"
-run_required decision_os "Full-managed ACOS v5 focused suite" python3 -m unittest discover -s "$ROOT/tests" -p 'test_*v5.py' -v
+run_required decision_os "Full-managed ACOS v6 and staged-activation focused suite" python3 -m unittest discover -s "$ROOT/tests" -p 'test_*v[56].py' -v
 run_required amazon_mcp "Offline MCP initialize/tools-list/schema/authority fixture" python3 "$ROOT/scripts/check_amazon_mcp_contract.py" --fixture "$ROOT/tests/fixtures/amazon_ads_mcp_contract.json" --check --output "$ARTIFACT_DIR/mcp-fixture-manifest.json"
 run_required amazon_postman "Official legacy Postman semantic compiler and strict capability matrix" python3 "$ROOT/scripts/sync_official_contracts.py" --check --strict-extended --output "$ARTIFACT_DIR/postman-capabilities.json"
 run_required amazon_postman "Official Unified API GA/Beta separation contract" python3 "$ROOT/scripts/check_unified_api_contract.py" --check --output "$ARTIFACT_DIR/unified-api-contract.json"
@@ -72,7 +72,7 @@ overall = "FAIL" if counts["FAIL"] else "PASS_WITH_EXTERNAL_ACCEPTANCE" if count
 report = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "overall": overall,
           "counts": dict(counts), "layers": {key: dict(value) for key, value in sorted(layers.items())}, "results": rows}
 json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-lines = ["# Hermes Amazon Ads Full-Managed Sealed ACOS v5 Sandbox Report", "", f"- Overall: **{overall}**",
+lines = ["# Hermes Amazon Ads Full-Managed Sealed ACOS v6 Sandbox Report", "", f"- Overall: **{overall}**",
          f"- PASS: {counts['PASS']}", f"- FAIL: {counts['FAIL']}", f"- EXTERNAL: {counts['EXTERNAL']}", "",
          "| Status | Layer | Check | Detail |", "|---|---|---|---|"]
 for row in rows: lines.append(f"| {row['status']} | {row['layer']} | {row['name']} | {row['detail'].replace('|', chr(92)+'|')} |")
