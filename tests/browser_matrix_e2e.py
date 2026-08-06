@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import tempfile
 import threading
 import traceback
@@ -12,14 +13,37 @@ from amazon_ads_control.api import build_server
 from amazon_ads_control.catalog import descriptor_from_payload
 from amazon_ads_control.config import Settings
 from amazon_ads_control.db import Store
+from amazon_ads_control.reporting import snapshot_hash
+from amazon_ads_control.runtime_readiness import readiness_snapshot
 from amazon_ads_control.security import hash_password
+from amazon_ads_control.service import ControlService
+from helpers import one_target_snapshot
 
 PASSWORD = "correct horse battery staple"
 TOOL = {
     "registered_name": "mcp_amazon_ads_campaign_management_create_campaign",
     "native_name": "campaign_management-create_campaign",
     "source": "hermes-registry:na",
-    "schema": {"description": "Create one campaign", "parameters": {"type": "object", "required": ["campaigns"], "properties": {"campaigns": {"type": "array", "minItems": 1, "maxItems": 1}}}},
+    "schema": {
+        "description": "Create one campaign",
+        "parameters": {
+            "type": "object",
+            "required": ["campaigns"],
+            "properties": {
+                "campaigns": {
+                    "type": "array", "minItems": 1, "maxItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "budget", "state", "adProduct"],
+                        "properties": {
+                            "name": {"type": "string"}, "budget": {"type": "number"},
+                            "state": {"type": "string"}, "adProduct": {"type": "string"},
+                        },
+                    },
+                }
+            },
+        },
+    },
 }
 
 
@@ -27,13 +51,58 @@ def unavailable(route: Route) -> None:
     route.fulfill(status=503, content_type="application/json", body='{"error":"simulated_dashboard_unavailable"}')
 
 
+def seed_cycle(store: Store, service: ControlService) -> None:
+    snapshot = one_target_snapshot(waste=False)
+    profile = snapshot["profile"]
+    window = snapshot["window"]
+    job = store.create_report_job({
+        "profile_id": profile["profile_id"],
+        "report_type": "browser-matrix-normalized-snapshot",
+        "start_date": window["start"],
+        "end_date": window["end"],
+        "timezone": "UTC",
+        "ad_product": "SPONSORED_PRODUCTS",
+        "columns": ["impressions", "clicks", "spend", "sales", "orders"],
+    }, "browser-matrix-seed")
+    report_id = "report-" + job["id"]
+    store.transition_report(job["id"], "SUBMITTED", {"report_id": report_id}, "browser-matrix-seed")
+    store.transition_report(job["id"], "SUCCEEDED", {"report_id": report_id}, "browser-matrix-seed")
+    content_hash = hashlib.sha256((report_id + "-content").encode()).hexdigest()
+    normalized_hash = snapshot_hash(snapshot)
+    store.transition_report(job["id"], "DOWNLOADED", {"content_hash": content_hash}, "browser-matrix-seed")
+    store.transition_report(job["id"], "VALIDATED", {"snapshot": snapshot}, "browser-matrix-seed")
+    validated = store.get_report_job(job["id"])
+    store.transition_report(job["id"], "INGESTED", {
+        "content_hash": content_hash,
+        "normalized_hash": normalized_hash,
+        "schema_hash": validated["schema_hash"],
+        "row_count": validated["row_count"],
+    }, "browser-matrix-seed")
+    service.plan_cycle({
+        "snapshot": snapshot,
+        "lineage": {"report_job_ids": [job["id"]], "action_ids": [], "normalized_hash": normalized_hash},
+    }, "browser-matrix-seed")
+
+
 def exercise(browser_type: BrowserType, root: Path) -> None:
     browser_name = browser_type.name
     stage = "settings"
-    settings = Settings(host="127.0.0.1", port=0, db_path=root / f"{browser_name}.db", public_origin="", control_password_hash=hash_password(PASSWORD), agent_token="a" * 48, session_ttl_seconds=3600, max_sessions=8, retention_days=30, allow_remote_bind=False)
+    settings = Settings(
+        host="127.0.0.1", port=0, db_path=root / f"{browser_name}.db", public_origin="",
+        control_password_hash=hash_password(PASSWORD), agent_token="a" * 48,
+        session_ttl_seconds=3600, max_sessions=8, retention_days=30, allow_remote_bind=False,
+    )
     store = Store(settings.db_path)
+    service = ControlService(store)
+    seed_cycle(store, service)
     store.sync_catalog([descriptor_from_payload(TOOL)])
-    store.record_runtime_status("hermes-plugin", {"readiness_protocol": 1, "result_outbox": {"pending": 0, "bytes": 0, "over_limit": False}, "catalog_sync": {"ok": True, "tool_count": 1}})
+    store.record_runtime_status("hermes-plugin", {
+        "readiness_protocol": 1,
+        "result_outbox": {"pending": 0, "bytes": 0, "over_limit": False},
+        "catalog_sync": {"ok": True, "tool_count": 1},
+    })
+    initial_readiness = readiness_snapshot(store)
+    assert initial_readiness["ready"], initial_readiness
     server = build_server(settings, store=store)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -61,11 +130,14 @@ def exercise(browser_type: BrowserType, root: Path) -> None:
         page.wait_for_selector("#app:not([hidden])")
         page.locator("#readiness-pill").filter(has_text="READY").wait_for()
         assert page.locator("#kpis .metric-card").count() == 4
+        assert page.locator("#trend-chart svg").is_visible()
         assert page.get_by_text("审批", exact=True).count() == 0
         stage = "autopilot"
         page.get_by_role("button", name="全托管运行").click()
+        page.locator("#mode-pill").filter(has_text="AUTOPILOT").wait_for()
+        writable = readiness_snapshot(store)
+        assert writable["writable"], writable
         page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
-        assert page.locator("#mode-pill").inner_text() == "AUTOPILOT"
         stage = "fault-injection"
         fault_injection_active[0] = True
         page.route("**/api/dashboard", unavailable)

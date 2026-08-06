@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import os
 import tempfile
 import threading
@@ -12,6 +13,7 @@ from amazon_ads_control.api import build_server
 from amazon_ads_control.catalog import descriptor_from_payload
 from amazon_ads_control.config import Settings
 from amazon_ads_control.db import Store
+from amazon_ads_control.reporting import snapshot_hash
 from amazon_ads_control.security import hash_password
 from amazon_ads_control.service import ControlService
 from helpers import one_target_snapshot
@@ -46,6 +48,35 @@ CREATE_CAMPAIGN = {
 }
 
 
+def ingested_lineage(store: Store, snapshot: dict) -> dict:
+    profile = snapshot["profile"]
+    window = snapshot["window"]
+    job = store.create_report_job({
+        "profile_id": profile["profile_id"],
+        "report_type": "browser-normalized-snapshot",
+        "start_date": window["start"],
+        "end_date": window["end"],
+        "timezone": "UTC",
+        "ad_product": "SPONSORED_PRODUCTS",
+        "columns": ["impressions", "clicks", "spend", "sales", "orders"],
+    }, "browser-e2e-seed")
+    report_id = "report-" + job["id"]
+    store.transition_report(job["id"], "SUBMITTED", {"report_id": report_id}, "browser-e2e-seed")
+    store.transition_report(job["id"], "SUCCEEDED", {"report_id": report_id}, "browser-e2e-seed")
+    content_hash = hashlib.sha256((report_id + "-content").encode()).hexdigest()
+    normalized_hash = snapshot_hash(snapshot)
+    store.transition_report(job["id"], "DOWNLOADED", {"content_hash": content_hash}, "browser-e2e-seed")
+    store.transition_report(job["id"], "VALIDATED", {"snapshot": snapshot}, "browser-e2e-seed")
+    validated = store.get_report_job(job["id"])
+    store.transition_report(job["id"], "INGESTED", {
+        "content_hash": content_hash,
+        "normalized_hash": normalized_hash,
+        "schema_hash": validated["schema_hash"],
+        "row_count": validated["row_count"],
+    }, "browser-e2e-seed")
+    return {"report_job_ids": [job["id"]], "action_ids": [], "normalized_hash": normalized_hash}
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         settings = Settings(
@@ -56,7 +87,11 @@ def main() -> int:
         )
         store = Store(settings.db_path)
         service = ControlService(store)
-        service.plan_cycle({"snapshot": one_target_snapshot()}, "browser-e2e-seed")
+        snapshot = one_target_snapshot(waste=False)
+        service.plan_cycle({
+            "snapshot": snapshot,
+            "lineage": ingested_lineage(store, snapshot),
+        }, "browser-e2e-seed")
         store.sync_catalog([descriptor_from_payload(CREATE_CAMPAIGN)])
         store.record_runtime_status(
             "hermes-plugin",
