@@ -1,4 +1,4 @@
-# Amazon Ads Full-Managed ACOS Autopilot v5
+# Amazon Ads Full-Managed ACOS Autopilot v6
 
 This replaces the former **Approval-Gated Full Autopilot**. The authenticated Amazon Ads Control Web is now visualization and emergency control only, not a routine approval surface.
 
@@ -33,8 +33,9 @@ Reject rather than request approval when an explicitly Sponsored Products plan v
 - cross-region writes;
 - unknown tools or unacknowledged live-Schema drift;
 - black-box composite, bulk, batch or end-to-end workflow mutations;
-- Campaign creation outside `HERMES-SP-`, creation in a state other than PAUSED, or configured budget/create limits;
-- Product Ads without an ASIN observed in trusted Amazon Ads evidence.
+- Campaign creation outside `HERMES-SP-`, creation of any delivery entity in a state other than PAUSED, or configured budget/create limits;
+- Product Ads without an ASIN observed in trusted Amazon Ads evidence;
+- a create plan whose atomic PAUSED-to-ENABLED activation tool is absent, ambiguous or incompatible with the live JSON Schema.
 
 ## Autonomous cycle
 
@@ -47,7 +48,9 @@ Reject rather than request approval when an explicitly Sponsored Products plan v
 7. Before mutable existing-entity writes, perform a fresh read and Compare-And-Set preparation.
 8. Execute exactly one narrow planned write per call. Never retry an uncertain mutation.
 9. Stop the Executor and delegate a different read-only Verifier Session.
-10. Re-read Amazon, bind the evidence action, verify every expected field and finalize only after all outcomes are resolved.
+10. Re-read Amazon and verify every expected field.
+11. When `activation_transition.state` is `activation_planned`, repeat Executor then different Verifier phases for the released rank. Do not stop after the PAUSED create phase.
+12. Continue until `activation_transition.state` is `completed`, `aborted`, or no activation transition exists. Final verified Campaign activation is finalized automatically.
 
 A constrained 2C2G host runs one child at a time. Executor and Verifier are sequential and invisible to the owner unless an exception requires explanation.
 
@@ -55,14 +58,14 @@ A constrained 2C2G host runs one child at a time. Executor and Verifier are sequ
 
 Decompose Campaign graphs into atomic actions. Use `{{decision:<plan-key>.entity_id}}` for IDs returned by earlier create actions and list the corresponding dependency. Every dependent action waits for one confirmed unique Amazon ID. Missing, ambiguous, pending, failed or uncertain predecessors stop dependents without replay.
 
-Create Campaigns PAUSED. Enable only after the object and its dependencies have been independently read back. Changes to the Profile envelope invalidate pending decisions.
+Create Campaigns, Ad Groups, Product Ads, Targets and Keywords PAUSED. The controller compiles exact activation actions from enabled live-catalog update tools and blocks them until the entire PAUSED creation graph has been independently read back. It then releases Product Ads/Targets/Keywords first, Ad Groups second and Campaigns last. Every activation rank is independently verified before the next rank becomes executable. A mismatch leaves the Campaign PAUSED and emits an exception; never improvise an enable call outside the released decision.
 
 ## Exception-only communication
 
-Do not interrupt the owner for normal adjustments. Surface concise Chinese alerts only for OAuth/Profile loss, report delay or malformed data, attribution immaturity, schema drift, repeated 429/timeouts, budget conflicts, unknown writes, verification mismatch, Outbox/database/disk/runtime failure or a safety fuse transition.
+Do not interrupt the owner for normal adjustments. Surface concise Chinese alerts only for OAuth/Profile loss, report delay or malformed data, attribution immaturity, schema drift, repeated 429/timeouts, budget conflicts, unknown writes, activation-path loss, verification mismatch, Outbox/database/disk/runtime failure or a safety fuse transition.
 
 When an exception occurs, explain what stopped, what remains safe, whether Amazon state is known, and the exact Hermes instruction that can resolve or resume it.
 
 ## Final report
 
-Return a concise Chinese summary containing the Profile, data window, spend, attributed sales, current and target ACOS, autonomous actions, independently verified outcomes, suppressed decisions, unresolved exceptions and next automatic cycle. Do not expose internal approval artifacts in the normal report.
+Return a concise Chinese summary containing the Profile, data window, spend, attributed sales, current and target ACOS, autonomous actions, independently verified outcomes, activation state, suppressed decisions, unresolved exceptions and next automatic cycle. Do not expose internal approval artifacts in the normal report.
