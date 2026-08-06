@@ -27,8 +27,13 @@ Keep the deployment in `OBSERVE` until every applicable item has dated evidence.
 - [ ] A different Session independently reads and verifies the result.
 - [ ] Timeout, mismatch and restart scenarios do not duplicate mutations.
 - [ ] A Campaign graph plan is released without a standing-authorization flag only when every action is inside the sealed envelope.
-- [ ] Campaigns are PAUSED, `HERMES-SP-` namespaced and within budget/create limits.
+- [ ] Campaigns, Ad Groups, Product Ads, Targets and Keywords are all created PAUSED; Campaign names use `HERMES-SP-` and budget/create limits hold.
+- [ ] Before creation, every delivery entity has one unambiguous enabled atomic activation tool that validates against the authenticated live JSON Schema.
 - [ ] Missing IDs stop dependents without replay.
+- [ ] The complete PAUSED graph is independently read back before any activation action is released.
+- [ ] Product Ads, Targets and Keywords activate and verify before Ad Groups; Ad Groups activate and verify before Campaigns.
+- [ ] A failed or ambiguous activation read keeps the Campaign PAUSED and emits one actionable exception.
+- [ ] Final task completion occurs only after the Campaign ENABLED state is independently read back.
 - [ ] Explicitly SP plans outside the envelope are rejected rather than routed to an approval queue.
 - [ ] Billing, account, permission, irreversible, cross-region and composite writes remain blocked.
 
