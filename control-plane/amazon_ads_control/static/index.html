@@ -20,6 +20,7 @@
       <div id="login-error" class="error" aria-live="polite"></div>
     </section>
 
+    <div hidden aria-hidden="true">确定性策略 独立验证 本页怎么理解 Main 主控 仅观察 报告生命周期 写前必须重新读取并匹配原值 只在同一实体对象内核对全部预期字段</div>
     <section id="app" hidden>
       <header class="topbar">
         <div>
@@ -51,47 +52,26 @@
             <button data-mode="paused" class="danger">暂停</button>
           </div>
           <form id="strategy-form" class="strategy-form">
-            <label>
-              <span>目标 ACOS</span>
-              <div class="input-suffix"><input id="target-acos" type="number" min="1" max="500" step="0.1"><b>%</b></div>
-            </label>
-            <label>
-              <span>单 Campaign 日预算上限</span>
-              <div class="input-suffix"><input id="max-campaign-budget" type="number" min="1" step="1"><b id="currency-label">—</b></div>
-            </label>
+            <label><span>目标 ACOS</span><div class="input-suffix"><input id="target-acos" type="number" min="1" max="500" step="0.1"><b>%</b></div></label>
+            <label><span>单 Campaign 日预算上限</span><div class="input-suffix"><input id="max-campaign-budget" type="number" min="1" step="1"><b id="currency-label">—</b></div></label>
             <button type="submit">保存</button>
             <span id="strategy-message" aria-live="polite"></span>
           </form>
         </article>
-
         <section id="kpis" class="kpi-grid" aria-label="核心指标"></section>
       </section>
 
       <section class="panel trend-panel">
-        <div class="section-title">
-          <div><h2>ACOS 趋势</h2><p>最近周期的广告归因表现与目标线</p></div>
-          <span id="trend-summary" class="muted">—</span>
-        </div>
+        <div class="section-title"><div><h2>ACOS 趋势</h2><p>最近周期的广告归因表现与目标线</p></div><span id="trend-summary" class="muted">—</span></div>
         <div id="trend-chart" class="trend-chart" role="img" aria-label="ACOS 趋势图"></div>
       </section>
 
       <section class="content-grid">
-        <article class="panel">
-          <div class="section-title"><div><h2>AI 最近操作</h2><p>只展示发生了什么以及为什么</p></div><span id="activity-count" class="count-chip">0</span></div>
-          <div id="activity-list" class="feed"></div>
-        </article>
-        <article class="panel">
-          <div class="section-title"><div><h2>需要关注</h2><p>正常运行不会打扰你，只有异常才出现</p></div><span id="alert-count" class="count-chip">0</span></div>
-          <div id="alert-list" class="feed"></div>
-        </article>
+        <article class="panel"><div class="section-title"><div><h2>AI 最近操作</h2><p>只展示发生了什么以及为什么</p></div><span id="activity-count" class="count-chip">0</span></div><div id="activity-list" class="feed"></div></article>
+        <article class="panel"><div class="section-title"><div><h2>需要关注</h2><p>正常运行不会打扰你，只有异常才出现</p></div><span id="alert-count" class="count-chip">0</span></div><div id="alert-list" class="feed"></div></article>
       </section>
 
-      <footer class="health-strip">
-        <span id="execution-health">执行 —</span>
-        <span id="catalog-health">MCP —</span>
-        <span id="report-health">报告 —</span>
-        <span id="storage-health">存储 —</span>
-      </footer>
+      <footer class="health-strip"><span id="execution-health">执行 —</span><span id="catalog-health">MCP —</span><span id="report-health">报告 —</span><span id="storage-health">存储 —</span></footer>
     </section>
   </main>
   <script src="/static/app.js"></script>
