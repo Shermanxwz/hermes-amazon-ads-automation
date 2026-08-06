@@ -32,7 +32,11 @@ class ExtensionRegistryTests(unittest.TestCase):
             EXTENSION_ORDER.index("sealed_activation"),
             EXTENSION_ORDER.index("sealed_activation_trust"),
         )
-        self.assertEqual(EXTENSION_ORDER[-1], "sealed_activation_trust")
+        self.assertLess(
+            EXTENSION_ORDER.index("sealed_activation_trust"),
+            EXTENSION_ORDER.index("sealed_activation_outcomes"),
+        )
+        self.assertEqual(EXTENSION_ORDER[-1], "sealed_activation_outcomes")
 
     def test_http_version_matches_package_generation(self):
         self.assertEqual(Handler.server_version, "HermesAdsControl/4.0")
