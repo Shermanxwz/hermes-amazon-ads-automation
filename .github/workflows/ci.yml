@@ -54,25 +54,30 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright/python:v1.57.0-noble
       options: --ipc=host
+    env:
+      HOME: /root
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v6
       - name: Install matching Playwright Python package
         run: python -m pip install --disable-pip-version-check playwright==1.57.0
       - name: Verify bundled browser engines
-        run: python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); [getattr(p,n).launch(headless=True).close() for n in ('chromium','firefox','webkit')]; p.stop()"
-      - name: Run Chromium full-managed E2E
         shell: bash
         run: |
           set -o pipefail
           mkdir -p artifacts/browser-matrix
+          python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); [getattr(p,n).launch(headless=True).close() for n in ('chromium','firefox','webkit')]; p.stop()" \
+            2>&1 | tee artifacts/browser-matrix/browser-engine-verify.log
+      - name: Run Chromium full-managed E2E
+        shell: bash
+        run: |
+          set -o pipefail
           PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" \
             python tests/browser_e2e.py 2>&1 | tee artifacts/browser-matrix/browser-e2e.log
       - name: Run Chromium Firefox WebKit matrix
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p artifacts/browser-matrix
           PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" \
             python tests/browser_matrix_e2e.py 2>&1 | tee artifacts/browser-matrix/browser-matrix.log
       - uses: actions/upload-artifact@v4
