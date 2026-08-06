@@ -34,7 +34,8 @@ Reject rather than request approval when an explicitly Sponsored Products plan v
 - unknown tools or unacknowledged live-Schema drift;
 - black-box composite, bulk, batch or end-to-end workflow mutations;
 - Campaign creation outside `HERMES-SP-`, creation of any delivery entity in a state other than PAUSED, or configured budget/create limits;
-- Product Ads without an ASIN observed in trusted Amazon Ads evidence;
+- Product Ads without an ASIN derived by the controller from trusted, ingested Amazon Ads evidence for the same Profile;
+- caller-supplied claims that an ASIN was observed, a create was verified or a recovery is authorized;
 - a create plan whose atomic PAUSED-to-ENABLED activation tool is absent, ambiguous or incompatible with the live JSON Schema.
 
 ## Autonomous cycle
@@ -50,7 +51,8 @@ Reject rather than request approval when an explicitly Sponsored Products plan v
 9. Stop the Executor and delegate a different read-only Verifier Session.
 10. Re-read Amazon and verify every expected field.
 11. When `activation_transition.state` is `activation_planned`, repeat Executor then different Verifier phases for the released rank. Do not stop after the PAUSED create phase.
-12. Continue until `activation_transition.state` is `completed`, `aborted`, or no activation transition exists. Final verified Campaign activation is finalized automatically.
+12. Continue until `activation_transition.state` is `completed`, `aborted`, `write_uncertain`, or no activation transition exists. Final verified Campaign activation is finalized automatically.
+13. On `write_uncertain`, do not execute or invent another activation action. Keep later stages blocked, report that Amazon state is unknown, and require independent reconciliation.
 
 A constrained 2C2G host runs one child at a time. Executor and Verifier are sequential and invisible to the owner unless an exception requires explanation.
 
@@ -58,7 +60,7 @@ A constrained 2C2G host runs one child at a time. Executor and Verifier are sequ
 
 Decompose Campaign graphs into atomic actions. Use `{{decision:<plan-key>.entity_id}}` for IDs returned by earlier create actions and list the corresponding dependency. Every dependent action waits for one confirmed unique Amazon ID. Missing, ambiguous, pending, failed or uncertain predecessors stop dependents without replay.
 
-Create Campaigns, Ad Groups, Product Ads, Targets and Keywords PAUSED. The controller compiles exact activation actions from enabled live-catalog update tools and blocks them until the entire PAUSED creation graph has been independently read back. It then releases Product Ads/Targets/Keywords first, Ad Groups second and Campaigns last. Every activation rank is independently verified before the next rank becomes executable. A mismatch leaves the Campaign PAUSED and emits an exception; never improvise an enable call outside the released decision.
+Create Campaigns, Ad Groups, Product Ads, Targets and Keywords PAUSED. The controller compiles exact activation actions from enabled live-catalog update tools and blocks them until the entire PAUSED creation graph has been independently read back. It then releases Product Ads/Targets/Keywords first, Ad Groups second and Campaigns last. Every activation rank is independently verified before the next rank becomes executable. A definite write failure aborts all unreleased stages. A pending, partial, timeout or otherwise uncertain write quarantines all remaining stages. A mismatch leaves the Campaign PAUSED and emits an exception; never improvise an enable call outside the released decision.
 
 ## Exception-only communication
 
