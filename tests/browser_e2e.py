@@ -145,7 +145,8 @@ def main() -> int:
                 page.get_by_role("button", name="登录").click()
                 page.wait_for_selector("#app:not([hidden])")
                 assert page.get_by_role("heading", name="广告全托管").is_visible()
-                assert page.locator("#mode-copy").inner_text().startswith("继续读取")
+                page.locator("#mode-pill").filter(has_text="OBSERVE").wait_for()
+                assert "不会修改任何广告" in page.locator("#mode-copy").inner_text()
                 page.locator("#readiness-pill").filter(has_text="READY").wait_for()
                 assert page.locator("#kpis .metric-card").count() == 4
                 assert page.locator("#trend-chart svg").is_visible()
