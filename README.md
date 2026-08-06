@@ -1,102 +1,43 @@
-# Hermes Amazon Ads Sealed ACOS Autopilot v4.0
+# Hermes Amazon Ads Full-Managed ACOS Autopilot
 
-面向 Amazon Ads 的 **广告归因 ACOS 封存级自主运营系统**。系统只使用广告侧数据，不接 Seller Central、成本、库存、自然销量、订单、退款、价格或 Buy Box。封存自主范围默认为 **Sponsored Products**；SB、SD、STV、DSP 保持 Observe 或逐项审批。
+面向 Amazon Ads 的**广告归因 ACOS 全托管自运营系统**。它只使用广告侧报告、Marketing Stream、Recommendations、MCP 和 Ads API，不接入 Seller Central，不读取成本、库存、自然销量、订单、退款、价格或 Buy Box。
 
-## 闭环
+## 产品形态
 
-```text
-Amazon Ads Reports / Marketing Stream / Recommendations
-                         │
-                         ▼
-延迟归因 + 贝叶斯 CVR/AOV/ACOS 后验
-                         │
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-竞价/否词/Harvest   全局预算/小时节奏   生命周期/结构维护
-        └────────────────┼────────────────┘
-                         ▼
-原子 Decision → 写前回读/CAS → MCP 或 Direct Ads API
-                         ▼
-真实 Amazon ID 绑定 → 不同 Session Verifier 独立回读
-                         ▼
-SQLite 审计、Outbox、恢复、告警、存储熔断
-```
+- **Hermes 是操作入口**：目标、暂停、恢复、解释和临时约束都直接告诉 Hermes。
+- **Web 是单页可视面板**：只展示花费、广告销售额、当前/目标 ACOS、趋势、AI 最近操作、异常和紧急开关。
+- **正常操作不审批**：Sponsored Products 硬边界内的竞价、预算、Placement、否词、Harvest、可逆暂停/恢复和结构维护自动执行。
+- **异常才打扰**：OAuth、报告、Schema、数据新鲜度、限流、写入不确定、验证不一致、磁盘和运行时异常才通知用户。
 
-## 决策内核
+## 全托管闭环
 
-v4 不再把点击阈值当作“置信度”。每个动作计算：
+Amazon Ads 数据进入延迟归因和贝叶斯 ACOS 后验，生成竞价、否词、Harvest、预算、小时节奏、生命周期和结构决策。每次只执行一个实体，写前回读并 Compare-And-Set，写后由不同 Hermes Session 独立读回，最后写入 SQLite 审计、恢复和异常通知。
 
-- 点击年龄对应的广告归因成熟度；
-- 分层收缩后的 CVR 与 AOV；
-- 预计最终广告归因订单、销售额和 ACOS；
-- `P(最终 ACOS > 最大 ACOS)`；
-- `P(最终 ACOS <= 目标 ACOS)`；
-- ACOS 区间和不确定性。
+## 自主范围
 
-降价、否词和隔离需要超目标风险概率足够高；扩价、加预算和恢复需要达标概率足够高。小样本不会因为达到固定点击数而获得 100% 置信度。
+默认只对 Sponsored Products 开放长期自主权限：Keyword、Product Target、Default Bid、Search Term 否定与 Exact Harvest、Placement、Campaign 预算、小时 Pacing、可逆暂停/恢复以及 Campaign/Ad Group/Product Ad/Target/Keyword 原子结构维护。
 
-## 自主能力
+调用方不再需要传入审批标记。只要完整计划符合 SP 封存包络，控制面会自动绑定长期授权并释放执行。
 
-- Keyword、Product Target、Default Bid 调整；
-- Search Term 否定与经过验证的 Exact Harvest；
-- Placement 调整；
-- Campaign 间等额预算转移，不增加账户总暴露；
-- Marketing Stream/小时数据驱动的日内小幅 Pacing；
-- 高风险实体可逆 `PAUSED` 隔离与验证后恢复；
-- 在长期授权包络内原子创建 SP Campaign、Ad Group、Product Ad、Target/Keyword。
+## 不可绕过的硬边界
 
-## SP 长期授权包络
-
-封存自主不是开放所有写工具。默认包络要求：
-
-- 仅指定且已启用的 Profile；
-- 仅 `SPONSORED_PRODUCTS`；
-- Campaign 名称以 `HERMES-SP-` 开头；
-- 新 Campaign 必须以 `PAUSED` 创建；
-- 单 Campaign 新预算默认不超过 50 个账户货币单位；
-- 每日新增 Campaign 总预算默认不超过 100；
-- 每日最多创建 2 个 Campaign；
-- Product Ad 的 ASIN 必须来自可信 Amazon Ads 证据；
+- Campaign 使用 `HERMES-SP-` 命名空间并以 `PAUSED` 创建；
+- 单 Campaign 日预算、每日新增预算和创建数量受限；
+- Product Ad ASIN 必须来自可信广告证据；
 - 状态只允许 `PAUSED ↔ ENABLED`；
-- `ENABLED` 必须有已验证创建或已验证恢复证据；
-- 每次写入只允许一个实体，并绑定精确参数和包络 Hash；
-- 写后必须由不同 Session 的 Verifier 独立回读。
+- Billing、Payment、账户、用户、角色和权限永久禁止；
+- Delete、Archive、Remove、跨区域、未知语义、Schema 漂移和黑盒复合写入永久禁止；
+- 写入结果不确定时停止，不盲目重试。
 
-Profile 策略一旦变化，待执行 Decision 的包络 Hash 失效并自动阻断。
+封存级安全来自不可绕过的边界、幂等、独立验证和熔断，而不是让用户逐项审批。
 
-## 永久禁止
+## 使用方式
 
-任何设置、LLM 或长期授权都不能开放：
+直接告诉 Hermes：“把目标 ACOS 调整到 25%”、“为什么今天 ACOS 上升？”、“暂停表现最差的两个 Target”、“总结今天所有调整”或“恢复全托管运行”。
 
-- Billing、Invoice、Payment；
-- 用户、角色、权限、邀请和账户链接；
-- Delete、Archive、Remove、Purge；
-- 跨区域写入；
-- 未知工具和未确认 Schema 漂移；
-- 黑盒 Composite/Bulk/End-to-End MCP Workflow 直接执行。
+Web 只提供全托管/观察/暂停、目标 ACOS、单 Campaign 日预算上限、核心 KPI、ACOS 趋势、AI 操作和异常。
 
-复合工作流只能被编译成单实体原子步骤，再分别执行和验证。
-
-## MCP 与 Direct API
-
-认证后的 Amazon Advertising MCP 是首选原子接口。项目同时维护每个必要 SP 操作的确定性 Direct Ads API 回退路由。只有完成 Profile、地区、工具 Schema 和回退路由的 Capability Attestation 后，运行时才可视为能力闭合。
-
-传统 Ads API 作为稳定生产适配器；Unified API GA 纳入合约兼容检查；Unified Reports、Events、Rules、RuleLinks、Labels 等 Beta 资源只允许 Observe，不能成为封存系统的唯一依赖。
-
-## 安全执行
-
-- 实时 MCP Catalog、语义、Family、Risk 和 Schema Hash；
-- Profile 与 NA/EU/FE 工具强绑定；
-- 所有写入必须匹配唯一 Decision；
-- 写前回读、Compare-And-Set、单实体原子预约；
-- 不确定 Mutation 不盲目重试；
-- Result Outbox 只重投结果信封，不重调 Amazon；
-- Runtime 心跳、数据库、Catalog 漂移、Callback、Outbox 和磁盘压力任一异常都会关闭写入；
-- 包络外结构、高风险和产品操作仍使用 payload-bound 人工审批。
-
-## 部署
-
-目标环境：2C2G Linux VPS，Executor 与 Verifier 顺序运行。标准流程同时是项目的 **Hermes environment install** 路径：
+## 部署与封存验证
 
 ```bash
 bash scripts/install.sh
@@ -106,6 +47,4 @@ bash scripts/validate_deploy.sh
 bash scripts/run_full_sandbox.sh
 ```
 
-默认仍是 `observe` 且执行关闭。生产启用顺序：OAuth → authenticated MCP `initialize/tools/list` → 真实报告闭环 → Profile 能力证明 → Test Account/低风险 SP Canary → 独立回读 → 完整归因窗口 → VPS 重启和备份恢复演练 → `autopilot`。
-
-仓库沙盒不能伪造真实账户授权、真实广告落库或成熟归因效果；这些会在完整沙盒报告中明确列为 `EXTERNAL`，不会被虚假标记为 PASS。详细设计见 `docs/SEALED_ACOS_V4.md` 与 `docs/PRODUCTION_ACCEPTANCE.md`。
+生产第一次启用仍须使用所有者凭据完成 OAuth、真实报告、Profile 能力证明、低风险 SP Canary、独立 Amazon 回读、完整归因窗口和 VPS 重启/备份恢复演练。仓库不会伪造这些外部证据。

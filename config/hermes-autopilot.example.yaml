@@ -1,9 +1,7 @@
-# Third-party Hermes plugins are opt-in. This name comes from plugin.yaml.
 plugins:
   enabled:
     - amazon-ads-control
 
-# Merge into ~/.hermes/config.yaml. Keep real values outside Git.
 delegation:
   provider: custom:new-api-230385
   model: MiniMax-M3
@@ -14,12 +12,6 @@ delegation:
   subagent_auto_approve: false
   max_iterations: 35
 
-# Amazon Ads official remote MCP is the data/execution capability surface.
-# Set AMAZON_ADS_MCP_URL to the exact endpoint supplied by Amazon/onboarding.
-# The public open-beta page confirms global availability but does not publish
-# separate EU/FE MCP hostnames. Never guess a regional hostname.
-# Also set ADS_MCP_DEFAULT_REGION=na|eu|fe in the Hermes service environment;
-# this binds the canonical mcp-amazon-ads toolset to the Profile region.
 mcp_servers:
   amazon-ads:
     url: ${AMAZON_ADS_MCP_URL}
@@ -31,23 +23,11 @@ mcp_servers:
     tools:
       prompts: false
       resources: false
-    # If the server does not support dynamic client registration, uncomment
-    # the pre-registered Login with Amazon client below. Hermes resolves ${...}
-    # from ~/.hermes/.env at connection time and stores OAuth tokens separately.
-    # oauth:
-    #   client_id: ${AMAZON_ADS_MCP_CLIENT_ID}
-    #   client_secret: ${AMAZON_ADS_MCP_CLIENT_SECRET}
-    #   scope: advertising::campaign_management
-    #   redirect_port: 0
 
-# Enable only the toolsets needed by the daily cron session.
 cron:
   enabled: true
 
 approvals:
-  # Routine bounded operations never wait on Hermes' native terminal prompt.
-  # High-risk plans pause in awaiting_approval and are approved in the
-  # authenticated local Web. /ads-approve remains disabled unless a separately
-  # isolated Gateway explicitly enables command approval and has no terminal,
-  # file, or environment-reading capability.
+  # Avoid Hermes terminal prompts in unattended cycles. The plugin remains the
+  # blocking authority and allows only exact profile-bound SP decisions.
   cron_mode: allow

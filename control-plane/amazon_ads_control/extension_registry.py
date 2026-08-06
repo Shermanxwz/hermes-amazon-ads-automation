@@ -4,35 +4,13 @@ from importlib import import_module
 import threading
 from typing import Final
 
-# This is the single authoritative order for runtime extensions. Extensions
-# later in the tuple wrap earlier safety boundaries; verification remains last.
 EXTENSION_ORDER: Final[tuple[str, ...]] = (
-    "closed_loop",
-    "closed_loop_fixes",
-    "strategy_hardening",
-    "report_evidence_hardening",
-    "callback_hardening",
-    "task_hardening",
-    "storage_maintenance",
-    "storage_alert_rollup",
-    "api_extension",
-    "approval_gate",
-    "approval_hardening",
-    # Region checks intentionally wrap the structural validators.
-    "regional_mcp",
-    "catalog_region_hardening",
-    "structural_execution",
-    "structural_hardening",
-    "write_batch_hardening",
-    "approval_contract_fixes",
-    # Sealed autonomy is deliberately installed only after all structural,
-    # approval-contract and batch validators exist. It may release an exact SP
-    # plan from per-plan approval, but cannot bypass those validators.
-    "sealed_autonomy",
-    "hermes_compat",
-    "hermes_lifecycle",
-    # Verification remains the final owner of independent read-back.
-    "verification_hardening",
+    "closed_loop", "closed_loop_fixes", "strategy_hardening", "report_evidence_hardening",
+    "callback_hardening", "task_hardening", "storage_maintenance", "storage_alert_rollup",
+    "api_extension", "approval_gate", "approval_hardening", "regional_mcp",
+    "catalog_region_hardening", "structural_execution", "structural_hardening",
+    "write_batch_hardening", "approval_contract_fixes", "sealed_autonomy",
+    "hermes_compat", "hermes_lifecycle", "verification_hardening",
 )
 
 _LOCK = threading.Lock()
@@ -55,8 +33,7 @@ def install_extensions() -> tuple[str, ...]:
             installer()
             installed.append(name)
         from .api import Handler
-
-        Handler.server_version = "HermesAdsControl/4.0"
+        Handler.server_version = "HermesAdsControl/5.0"
         _INSTALLED = tuple(installed)
         return _INSTALLED
 

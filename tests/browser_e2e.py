@@ -14,6 +14,7 @@ from amazon_ads_control.config import Settings
 from amazon_ads_control.db import Store
 from amazon_ads_control.security import hash_password
 from amazon_ads_control.service import ControlService
+from helpers import one_target_snapshot
 
 PASSWORD = "correct horse battery staple"
 CREATE_CAMPAIGN = {
@@ -30,11 +31,12 @@ CREATE_CAMPAIGN = {
                     "type": "array", "minItems": 1, "maxItems": 1,
                     "items": {
                         "type": "object",
-                        "required": ["name", "budget", "state"],
+                        "required": ["name", "budget", "state", "adProduct"],
                         "properties": {
                             "name": {"type": "string"},
                             "budget": {"type": "number"},
                             "state": {"type": "string"},
+                            "adProduct": {"type": "string"},
                         },
                     },
                 }
@@ -47,13 +49,14 @@ CREATE_CAMPAIGN = {
 def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         settings = Settings(
-            host="127.0.0.1", port=0, db_path=Path(td)/"state.db", public_origin="",
-            control_password_hash=hash_password(PASSWORD), agent_token="a"*48,
+            host="127.0.0.1", port=0, db_path=Path(td) / "state.db", public_origin="",
+            control_password_hash=hash_password(PASSWORD), agent_token="a" * 48,
             session_ttl_seconds=3600, max_sessions=8, retention_days=30,
             allow_remote_bind=False,
         )
         store = Store(settings.db_path)
         service = ControlService(store)
+        service.plan_cycle({"snapshot": one_target_snapshot()}, "browser-e2e-seed")
         store.sync_catalog([descriptor_from_payload(CREATE_CAMPAIGN)])
         store.record_runtime_status(
             "hermes-plugin",
@@ -65,139 +68,80 @@ def main() -> int:
             },
         )
         managed = service.create_managed_plan({
-            "title": "Browser exact Campaign approval",
-            "profile": {
-                "profile_id": "profile-browser", "marketplace": "US",
-                "country_code": "US", "currency": "USD",
-            },
+            "title": "Browser full-managed Campaign",
+            "profile": {"profile_id": "p1", "marketplace": "US", "country_code": "US", "currency": "USD"},
             "actions": [{
                 "plan_key": "browser-campaign",
                 "tool_name": CREATE_CAMPAIGN["registered_name"],
                 "action_type": "create_campaign",
                 "entity_type": "campaign",
                 "entity_id": "planned:browser-campaign",
-                "arguments": {"campaigns": [{
-                    "name": "Browser Approved Campaign", "budget": 19, "state": "PAUSED",
-                }]},
-                "expected_state": {
-                    "name": "Browser Approved Campaign", "budget": 19, "state": "PAUSED",
-                },
+                "arguments": {"campaigns": [{"name": "HERMES-SP-BROWSER-001", "budget": 19, "state": "PAUSED", "adProduct": "SPONSORED_PRODUCTS"}]},
+                "expected_state": {"name": "HERMES-SP-BROWSER-001", "budget": 19, "state": "PAUSED"},
                 "maximum_daily_budget": 19,
             }],
         }, "browser-e2e-seed")
-        approval_hash = managed["approval"]["payload_hash"]
+        assert managed["standing_authorization"]["applied"] is True
+        assert managed["standing_authorization"]["automatic"] is True
+        assert managed["task"]["status"] == "planned"
+        assert managed["approval"]["status"] == "cancelled"
 
-        report_spec = {
-            "profile_id": "profile-browser",
-            "start_date": "2026-07-01",
-            "end_date": "2026-07-02",
-            "timezone": "UTC",
-            "ad_product": "SPONSORED_PRODUCTS",
-        }
-        succeeded = store.create_report_job(
-            {**report_spec, "report_type": "browser-success"}, "browser-e2e-seed"
-        )
-        store.transition_report(
-            succeeded["id"], "SUBMITTED", {"report_id": "REPORT-SUCCESS"}, "browser-e2e-seed"
-        )
-        store.transition_report(
-            succeeded["id"], "SUCCEEDED", {"report_id": "REPORT-SUCCESS"}, "browser-e2e-seed"
-        )
-        failed = store.create_report_job(
-            {**report_spec, "report_type": "browser-failed"}, "browser-e2e-seed"
-        )
-        store.transition_report(
-            failed["id"], "FAILED", {"error": "fixture failure"}, "browser-e2e-seed"
-        )
-
-        server = build_server(settings)
-        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        server = build_server(settings, store=store)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
         base = f"http://127.0.0.1:{server.server_address[1]}"
         console_errors: list[str] = []
         page_errors: list[str] = []
         try:
-            with sync_playwright() as p:
-                launch={"headless":True}
+            with sync_playwright() as playwright:
+                launch = {"headless": True}
                 if os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE"):
-                    launch["executable_path"]=os.environ["PLAYWRIGHT_CHROMIUM_EXECUTABLE"]
-                browser = p.chromium.launch(**launch)
+                    launch["executable_path"] = os.environ["PLAYWRIGHT_CHROMIUM_EXECUTABLE"]
+                browser = playwright.chromium.launch(**launch)
                 context = browser.new_context(viewport={"width": 1440, "height": 1000})
                 page = context.new_page()
                 page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
                 page.on("pageerror", lambda error: page_errors.append(str(error)))
                 response = page.goto(base, wait_until="networkidle")
-                assert response and response.ok, f"dashboard load failed: {response.status if response else 'none'}"
+                assert response and response.ok
                 assert response.headers.get("x-frame-options") == "DENY"
                 assert "object-src 'none'" in response.headers.get("content-security-policy", "")
                 page.get_by_placeholder("控制台密码").fill(PASSWORD)
                 page.get_by_role("button", name="登录").click()
                 page.wait_for_selector("#app:not([hidden])")
-                assert page.get_by_text("本页怎么理解").is_visible()
-                assert page.get_by_text("Main 主控").first.is_visible()
-                assert page.locator("#mode-help").inner_text().startswith("仅观察")
+                assert page.get_by_role("heading", name="广告全托管").is_visible()
+                assert page.locator("#mode-copy").inner_text().startswith("继续读取")
                 page.locator("#readiness-pill").filter(has_text="READY").wait_for()
-
-                succeeded_row = page.locator("#reports tr").filter(has_text="browser-success")
-                failed_row = page.locator("#reports tr").filter(has_text="browser-failed")
-                assert "good" in (succeeded_row.locator(".badge").get_attribute("class") or "")
-                assert "bad" in (failed_row.locator(".badge").get_attribute("class") or "")
-
-                page.get_by_role("button", name="审批", exact=True).click()
-                page.locator("#approvals.tab.active").wait_for()
-                assert page.get_by_text("Browser exact Campaign approval", exact=True).is_visible()
-                action = page.locator("#approval-list details.approval-action").first
-                action.locator("summary").click()
-                assert action.get_attribute("open") is not None
-                assert "browser-campaign" in action.inner_text()
-                argument_json = action.locator("pre").nth(0).inner_text()
-                expected_json = action.locator("pre").nth(1).inner_text()
-                assert "Browser Approved Campaign" in argument_json
-                assert '"budget": 19' in argument_json
-                assert '"state": "PAUSED"' in argument_json
-                assert "Browser Approved Campaign" in expected_json
-                assert page.get_by_text(approval_hash, exact=True).is_visible()
-                assert page.get_by_role("button", name="批准", exact=True).is_visible()
-
-                page.once("dialog", lambda dialog: dialog.dismiss())
-                page.get_by_role("button", name="批准", exact=True).click()
-                page.wait_for_timeout(100)
-                assert store.dashboard()["approvals"]["recent"][0]["status"] == "pending"
-                assert page.get_by_role("button", name="批准", exact=True).is_enabled()
-                assert page.locator("#notice").is_hidden()
-
-                page.once("dialog", lambda dialog: dialog.dismiss())
-                page.get_by_role("button", name="拒绝", exact=True).click()
-                page.wait_for_timeout(100)
-                assert store.dashboard()["approvals"]["recent"][0]["status"] == "pending"
-                assert page.get_by_role("button", name="拒绝", exact=True).is_enabled()
-                assert page.locator("#notice").is_hidden()
-
-                page.get_by_role("button", name="决策", exact=True).click()
-                assert page.locator("#decisions").get_attribute("class") == "tab active"
-                page.get_by_role("button", name="Profiles / MCP").click()
-                assert page.get_by_text("目标 ACOS", exact=False).first.is_visible()
-
-                page.get_by_role("button", name="自动运营").click()
+                assert page.locator("#kpis .metric-card").count() == 4
+                assert page.locator("#trend-chart svg").is_visible()
+                assert page.locator("#activity-list").is_visible()
+                assert page.get_by_text("审批", exact=True).count() == 0
+                page.locator("#target-acos").fill("27")
+                page.locator("#max-campaign-budget").fill("45")
+                page.get_by_role("button", name="保存", exact=True).click()
+                page.locator("#notice").filter(has_text="运营目标已更新").wait_for()
+                current = store.get_settings()
+                assert current["target_acos"] == 27
+                assert current["sealed_sp_max_campaign_budget"] == 45
+                page.get_by_role("button", name="全托管运行").click()
                 page.locator("#mode-pill").filter(has_text="AUTOPILOT").wait_for()
                 page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
-                assert "Executor 可写" in page.locator("#execution-pill").inner_text()
-                assert "Executor 只执行" in page.locator("#mode-help").inner_text()
-
+                assert "自动分析、执行和独立回读" in page.locator("#mode-copy").inner_text()
                 page.get_by_role("button", name="暂停", exact=True).click()
                 page.locator("#mode-pill").filter(has_text="PAUSED").wait_for()
-                assert "阻断" in page.locator("#mode-help").inner_text()
-
                 page.set_viewport_size({"width": 390, "height": 844})
-                page.get_by_role("button", name="总览", exact=True).click()
-                assert page.locator("header").bounding_box()["width"] <= 390
-                assert page.locator(".controls").is_visible()
+                assert page.locator(".topbar").bounding_box()["width"] <= 390
+                assert page.locator(".mode-buttons").is_visible()
+                assert page.locator("#kpis").is_visible()
                 page.reload(wait_until="networkidle")
                 page.locator("#app").wait_for(state="visible")
                 page.get_by_role("button", name="退出").click()
                 page.wait_for_selector("#login:not([hidden])")
                 browser.close()
         finally:
-            server.shutdown(); server.server_close(); thread.join()
+            server.shutdown()
+            server.server_close()
+            thread.join()
         assert not console_errors, f"browser console errors: {console_errors}"
         assert not page_errors, f"browser page errors: {page_errors}"
     print("browser-e2e: OK")

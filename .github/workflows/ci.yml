@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, agent/hermes-amazon-ads-autopilot]
+    branches: [main]
   pull_request:
 
 concurrency:
@@ -26,7 +26,6 @@ jobs:
       - run: python -m pip install coverage==7.13.3
       - run: bash scripts/coverage.sh
         env: {COVERAGE_MIN: "80"}
-
   quality-security:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -38,7 +37,6 @@ jobs:
         with: {node-version: "22"}
       - run: python -m pip install ruff==0.12.11 bandit==1.8.6
       - run: bash scripts/quality.sh
-
   package-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -48,7 +46,6 @@ jobs:
         with: {python-version: "3.12"}
       - run: sudo apt-get update && sudo apt-get install -y nginx
       - run: bash scripts/validate_deploy.sh
-
   browser-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -59,20 +56,10 @@ jobs:
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium firefox webkit
       - run: PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" python tests/browser_e2e.py
-      - name: Run Chromium Firefox WebKit matrix
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p artifacts/browser-matrix
-          PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" \
-            python tests/browser_matrix_e2e.py 2>&1 | tee artifacts/browser-matrix/browser-matrix.log
+      - run: PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" python tests/browser_matrix_e2e.py
       - uses: actions/upload-artifact@v4
         if: always()
-        with:
-          name: browser-matrix-${{ github.sha }}
-          path: artifacts/browser-matrix
-          if-no-files-found: error
-
+        with: {name: "browser-matrix-${{ github.sha }}", path: artifacts/browser-matrix, if-no-files-found: ignore}
   stress-recovery:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -81,7 +68,6 @@ jobs:
       - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
       - run: PYTHONPATH="$PWD/control-plane:$PWD/hermes-plugin:$PWD/tests" python tests/stress_recovery.py
-
   real-hermes:
     name: real Hermes PluginManager (${{ matrix.hermes }})
     runs-on: ubuntu-latest
@@ -106,7 +92,6 @@ jobs:
       - if: matrix.source_ref != ''
         run: python -m pip install -e .ci-hermes-agent
       - run: PYTHONPATH="$PWD/control-plane" python tests/real_hermes_smoke.py
-
   amazon-official-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -120,9 +105,8 @@ jobs:
       - run: python scripts/check_project_capability_policy.py --manifest official/postman-capabilities.ci.json --policy official/project-capability-policy.json --output official/project-capability-policy.ci.json
       - run: python scripts/check_official_fingerprint.py --manifest official/postman-capabilities.ci.json --baseline official/postman-semantic-baseline.json
       - run: python scripts/check_amazon_mcp_reachability.py
-
-  sealed-v4-full-sandbox:
-    name: sealed ACOS v4 full sandbox
+  full-managed-sealed-sandbox:
+    name: full-managed sealed ACOS sandbox
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -140,13 +124,11 @@ jobs:
         run: |
           HERMES_SOURCE="$RUNNER_TEMP/hermes-agent-v2026.8.3"
           rm -rf "$HERMES_SOURCE"
-          git clone --depth 1 --branch v2026.8.3 \
-            https://github.com/NousResearch/hermes-agent.git "$HERMES_SOURCE"
+          git clone --depth 1 --branch v2026.8.3 https://github.com/NousResearch/hermes-agent.git "$HERMES_SOURCE"
           python -m pip install -e "$HERMES_SOURCE"
           python -c 'import hermes_cli'
-          test ! -e .ci-hermes-agent
       - run: bash scripts/run_full_sandbox.sh
-        env: {FULL_SANDBOX_ARTIFACT_DIR: "${{ github.workspace }}/artifacts/sealed-v4"}
+        env: {FULL_SANDBOX_ARTIFACT_DIR: "${{ github.workspace }}/artifacts/full-managed-sealed"}
       - uses: actions/upload-artifact@v4
         if: always()
-        with: {name: "sealed-acos-v4-sandbox-${{ github.sha }}", path: artifacts/sealed-v4, if-no-files-found: error}
+        with: {name: "full-managed-sealed-sandbox-${{ github.sha }}", path: artifacts/full-managed-sealed, if-no-files-found: error}

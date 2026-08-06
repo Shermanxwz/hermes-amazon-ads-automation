@@ -1,8 +1,8 @@
-"""Hermes Amazon Ads sealed, deterministic ACOS control plane."""
+"""Hermes Amazon Ads full-managed, deterministic ACOS control plane."""
 
 from .extension_registry import install_extensions as _install_extensions
 
-__version__ = "4.0.0"
+__version__ = "5.0.0"
 
 _install_extensions()
 

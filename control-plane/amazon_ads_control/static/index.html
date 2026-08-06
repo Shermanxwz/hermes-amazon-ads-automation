@@ -3,110 +3,97 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Hermes Amazon Ads</title>
+  <title>Hermes Ads Autopilot</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <main>
-    <section id="login" class="card login">
-      <h1>Hermes Amazon Ads</h1>
-      <p>确定性策略 · Executor 执行 · 独立验证 · 全程可追溯</p>
-      <form id="login-form"><input id="password" type="password" autocomplete="current-password" placeholder="控制台密码" required><button>登录</button></form>
-      <div id="login-error" class="error"></div>
+    <section id="login" class="login-panel">
+      <div class="brand-mark">H</div>
+      <h1>Hermes Ads Autopilot</h1>
+      <p>广告归因 ACOS 全托管运营</p>
+      <form id="login-form">
+        <label for="password">控制台密码</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="控制台密码" required>
+        <button type="submit">登录</button>
+      </form>
+      <div id="login-error" class="error" aria-live="polite"></div>
     </section>
 
     <section id="app" hidden>
-      <header>
-        <div><h1>Amazon Ads 主控</h1><p id="generated">—</p></div>
-        <div class="controls" aria-label="运行模式">
-          <button data-mode="autopilot" title="主控分析，Executor 执行，Verifier 独立验证">自动运营</button>
-          <button data-mode="observe" title="继续读取和判断，但禁止广告写入">仅观察</button>
-          <button data-mode="paused" title="阻断所有 Amazon Ads 自动活动">暂停</button>
-          <button id="refresh">刷新</button>
-          <button id="logout" class="ghost">退出</button>
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">AMAZON ADS · SP</div>
+          <h1>广告全托管</h1>
+          <p id="generated">—</p>
+        </div>
+        <div class="top-actions">
+          <button id="refresh" class="secondary">刷新</button>
+          <button id="logout" class="secondary">退出</button>
         </div>
       </header>
 
-      <section class="status-strip">
-        <span id="mode-pill">—</span>
-        <span id="execution-pill">—</span>
-        <span id="catalog-pill">—</span>
-        <span id="alerts-pill">—</span>
-        <span id="report-pill">报告 —</span>
-        <span id="callback-pill">回调 —</span>
-        <span id="resource-pill">资源 —</span>
-      </section>
-      <p id="mode-help" class="mode-help" aria-live="polite">—</p>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
-      <details class="card guide" open>
-        <summary>本页怎么理解</summary>
-        <div class="guide-grid">
-          <section>
-            <h3>运行模式</h3>
-            <p><strong>自动运营：</strong>主控自动判断，Executor 只执行计划内操作，Verifier 独立读回。</p>
-            <p><strong>仅观察：</strong>继续采集、分析和生成决策，但不修改广告。</p>
-            <p><strong>暂停：</strong>阻断 Amazon Ads 读取、数据任务和写入，适合排查异常。</p>
-          </section>
-          <section>
-            <h3>角色分工</h3>
-            <p><strong>Main 主控：</strong>采集数据、调用确定性策略、建任务和委派，不能写广告。</p>
-            <p><strong>Executor 执行器：</strong>只能执行绑定任务中的单实体计划，写前必须重新读取并匹配原值。</p>
-            <p><strong>Verifier 验证器：</strong>只读重新查询 Amazon，只在同一实体对象内核对全部预期字段。</p>
-          </section>
-          <section>
-            <h3>判断原则</h3>
-            <p>LLM 负责解释和编排；真正可执行的变化必须来自已入库报告、成熟数据和确定性规则。</p>
-            <p>数据过旧、归因未成熟、报告血缘缺失、Schema 漂移或结果无法确认时，系统会停止写入并记录原因。</p>
-          </section>
-        </div>
-      </details>
+      <section class="hero-grid">
+        <article class="control-panel">
+          <div class="control-heading">
+            <div>
+              <span id="mode-pill" class="status-pill">—</span>
+              <h2 id="mode-title">—</h2>
+              <p id="mode-copy">—</p>
+            </div>
+            <span id="readiness-pill" class="status-pill">—</span>
+          </div>
+          <div class="mode-buttons" aria-label="运行模式">
+            <button data-mode="autopilot">全托管运行</button>
+            <button data-mode="observe" class="secondary">仅观察</button>
+            <button data-mode="paused" class="danger">暂停</button>
+          </div>
+          <form id="strategy-form" class="strategy-form">
+            <label>
+              <span>目标 ACOS</span>
+              <div class="input-suffix"><input id="target-acos" type="number" min="1" max="500" step="0.1"><b>%</b></div>
+            </label>
+            <label>
+              <span>单 Campaign 日预算上限</span>
+              <div class="input-suffix"><input id="max-campaign-budget" type="number" min="1" step="1"><b id="currency-label">—</b></div>
+            </label>
+            <button type="submit">保存</button>
+            <span id="strategy-message" aria-live="polite"></span>
+          </form>
+        </article>
 
-      <section id="kpis" class="kpis"></section>
-
-      <nav id="tabs">
-        <button class="active" data-tab="overview">总览</button>
-        <button data-tab="decisions">决策</button>
-        <button data-tab="changes">变更与验证</button>
-        <button data-tab="alerts">异常</button>
-        <button data-tab="profiles">Profiles / MCP</button>
-      </nav>
-
-      <section id="overview" class="tab active">
-        <p class="tab-help">查看广告数据周期、持久报告、主控任务、Executor/Verifier 状态和系统运行记录。</p>
-        <div class="grid two">
-          <article class="card"><h2>最近周期</h2><p class="section-help">每一行代表一次带报告血缘的广告数据快照和确定性策略计算；没有血缘的孤儿周期不能创建执行任务。</p><div id="cycles"></div></article>
-          <article class="card"><h2>任务与 Worker</h2><p class="section-help">任务由 Main 创建；Executor 写前 Compare-And-Set，Verifier 在不同会话中独立读回。</p><div id="tasks"></div><div id="workers"></div></article>
-        </div>
-        <div class="grid two">
-          <article class="card"><h2>报告生命周期</h2><p class="section-help">展示稳定 Report Key 的提交、下载、校验、入库、失败隔离和显式重试记录。</p><div id="reports"></div></article>
-          <article class="card"><h2>运行与补投状态</h2><p class="section-help">展示 cgroup 实际资源档位和 Durable Outbox 待补投数量；这里只告知，不要求日常审批。</p><div id="runtime-status"></div></article>
-        </div>
-        <article class="card"><h2>系统事件</h2><p class="section-help">记录模式变化、任务生命周期、工具阻断、数据质量和安全事件，用于解释系统为何执行或停止。</p><div id="events"></div></article>
+        <section id="kpis" class="kpi-grid" aria-label="核心指标"></section>
       </section>
 
-      <section id="decisions" class="tab"><p class="tab-help">这里展示策略引擎基于实际广告数据生成的计划。决策不等于已经执行，只有满足全部安全条件后才会被 Executor 领取。</p><article class="card"><h2>确定性策略决策</h2><p class="section-help">“原因”说明命中的规则与证据；“计划”保存实体、修改前后值、预期状态和匹配字段。</p><div id="decision-list"></div></article></section>
-      <section id="changes" class="tab"><p class="tab-help">先看 Executor 的真实工具调用和结构化返回，再看独立 Verifier 是否从 Amazon 读到了预期状态。</p><article class="card"><h2>工具调用与结构化结果</h2><p class="section-help">记录调用前授权、调用后结果、允许或阻断原因。部分成功、异步处理中和未知响应不会被误记为已完成。</p><div id="actions"></div></article><article class="card"><h2>独立 Verifier 读回</h2><p class="section-help">Verifier 必须是不同的只读子代理；只有唯一实体对象的实际状态与计划一致，决策才会标记为 verified。</p><div id="verifications"></div></article></section>
-      <section id="alerts" class="tab"><p class="tab-help">异常不会自动消失。先处理关键异常，再恢复自动运营；严重异常会让写入 fail-closed。</p><article class="card"><h2>需要关注</h2><p class="section-help">包括报告失败/隔离、MCP Schema 漂移、工具消失、预算暴露、执行结果未确认和验证不一致。</p><div id="alert-list"></div></article></section>
-      <section id="profiles" class="tab">
-        <p class="tab-help">管理广告 Profile 的核心目标，并查看 Hermes 当前真实发现的 Amazon Ads MCP 工具合同。</p>
-        <div class="grid two">
-          <article class="card"><h2>广告 Profiles</h2><p class="section-help">每个 Profile 对应一个广告账户/市场。策略可按 Profile 覆盖全局默认值。</p><div id="profile-list"></div></article>
-          <article class="card"><h2>核心策略</h2><p class="section-help">这些是运营边界，不是一次性操作按钮。保存后用于后续新决策；已经执行的历史不会被改写。</p>
-            <form id="strategy-form" class="strategy-form">
-              <label>目标 ACOS %<small>系统希望稳定靠近的日常效率目标。</small><input id="target-acos" type="number" min="1" step="0.1"></label>
-              <label>最高 ACOS %<small>超过后会进入更严格的降价或止损判断。</small><input id="max-acos" type="number" min="1" step="0.1"></label>
-              <label>单次竞价最大变化 %<small>限制一次关键词/商品投放竞价调整幅度。</small><input id="max-bid-change" type="number" min="1" max="100"></label>
-              <label>单次预算最大变化 %<small>限制一次 Campaign 预算调整幅度。</small><input id="max-budget-change" type="number" min="1" max="100"></label>
-              <button>保存策略</button><span id="strategy-message"></span>
-            </form>
-          </article>
+      <section class="panel trend-panel">
+        <div class="section-title">
+          <div><h2>ACOS 趋势</h2><p>最近周期的广告归因表现与目标线</p></div>
+          <span id="trend-summary" class="muted">—</span>
         </div>
-        <article class="card"><h2>Amazon Ads MCP 工具目录</h2><p class="section-help">目录来自 Hermes 实时注册表；控制面重新推导语义、族和风险。Schema 哈希变化时写入会暂停。</p><div id="catalog"></div><div id="catalog-tools"></div></article>
+        <div id="trend-chart" class="trend-chart" role="img" aria-label="ACOS 趋势图"></div>
       </section>
+
+      <section class="content-grid">
+        <article class="panel">
+          <div class="section-title"><div><h2>AI 最近操作</h2><p>只展示发生了什么以及为什么</p></div><span id="activity-count" class="count-chip">0</span></div>
+          <div id="activity-list" class="feed"></div>
+        </article>
+        <article class="panel">
+          <div class="section-title"><div><h2>需要关注</h2><p>正常运行不会打扰你，只有异常才出现</p></div><span id="alert-count" class="count-chip">0</span></div>
+          <div id="alert-list" class="feed"></div>
+        </article>
+      </section>
+
+      <footer class="health-strip">
+        <span id="execution-health">执行 —</span>
+        <span id="catalog-health">MCP —</span>
+        <span id="report-health">报告 —</span>
+        <span id="storage-health">存储 —</span>
+      </footer>
     </section>
   </main>
   <script src="/static/app.js"></script>
-  <script src="/static/app_v3.js"></script>
 </body>
 </html>
