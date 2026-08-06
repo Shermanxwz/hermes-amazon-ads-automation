@@ -15,12 +15,24 @@ CREATE_CAMPAIGN = {
                 "name": {"type": "string"}, "budget": {"type": "number", "minimum": 1},
                 "state": {"type": "string"}, "adProduct": {"type": "string"}}}}}}},
 }
+UPDATE_CAMPAIGN = {
+    "registered_name": "mcp_amazon_ads_campaign_management_update_campaign",
+    "native_name": "campaign_management-update_campaign", "source": "hermes-registry:na",
+    "schema": {"description": "Update one Sponsored Products campaign", "parameters": {
+        "type": "object", "required": ["campaigns"], "properties": {"campaigns": {
+            "type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object",
+            "required": ["campaignId", "state"], "properties": {
+                "campaignId": {"type": "string"}, "state": {"type": "string"}}}}}}},
+}
 
 
 class SealedAutonomyV4Tests(unittest.TestCase):
     def setUp(self):
         self.env = Environment(); self.env.plan(one_target_snapshot())
-        self.env.store.sync_catalog([descriptor_from_payload(CREATE_CAMPAIGN)])
+        self.env.store.sync_catalog([
+            descriptor_from_payload(CREATE_CAMPAIGN),
+            descriptor_from_payload(UPDATE_CAMPAIGN),
+        ])
         self.env.store.update_settings({"mode": "autopilot", "execution_enabled": True})
 
     def tearDown(self):
@@ -41,8 +53,11 @@ class SealedAutonomyV4Tests(unittest.TestCase):
         self.assertTrue(result["standing_authorization"]["applied"])
         self.assertTrue(result["task"]["write_allowed"]); self.assertEqual(result["task"]["status"], "planned")
         self.assertEqual(result["approval"]["status"], "cancelled")
-        decision = self.env.store.list_decisions(task_id=result["task"]["id"])[0]
+        decisions = self.env.store.list_decisions(task_id=result["task"]["id"])
+        decision = next(item for item in decisions if item["action_type"] == "create_campaign")
+        activation = next(item for item in decisions if item["payload"].get("activation_phase"))
         self.assertEqual(decision["payload"]["standing_authorization"]["ad_product"], "SPONSORED_PRODUCTS")
+        self.assertEqual(activation["status"], "blocked")
 
     def test_campaign_must_be_paused_namespaced_and_bounded(self):
         with self.assertRaisesRegex(ValueError, "PAUSED"):
