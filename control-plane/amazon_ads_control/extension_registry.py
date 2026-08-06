@@ -12,6 +12,7 @@ EXTENSION_ORDER: Final[tuple[str, ...]] = (
     "write_batch_hardening", "approval_contract_fixes", "sealed_autonomy",
     "hermes_compat", "hermes_lifecycle", "http_disconnect_hardening",
     "verification_hardening", "sealed_activation", "sealed_activation_trust",
+    "sealed_activation_outcomes",
 )
 
 _LOCK = threading.Lock()
