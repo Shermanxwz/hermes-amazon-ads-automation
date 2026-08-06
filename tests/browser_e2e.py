@@ -46,6 +46,31 @@ CREATE_CAMPAIGN = {
         },
     },
 }
+UPDATE_CAMPAIGN = {
+    "registered_name": "mcp_amazon_ads_campaign_management_update_campaign",
+    "native_name": "campaign_management-update_campaign",
+    "source": "hermes-registry:na",
+    "schema": {
+        "description": "Update one campaign",
+        "parameters": {
+            "type": "object",
+            "required": ["campaigns"],
+            "properties": {
+                "campaigns": {
+                    "type": "array", "minItems": 1, "maxItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": ["campaignId", "state"],
+                        "properties": {
+                            "campaignId": {"type": "string"},
+                            "state": {"type": "string"},
+                        },
+                    },
+                }
+            },
+        },
+    },
+}
 
 
 def ingested_lineage(store: Store, snapshot: dict) -> dict:
@@ -92,14 +117,17 @@ def main() -> int:
             "snapshot": snapshot,
             "lineage": ingested_lineage(store, snapshot),
         }, "browser-e2e-seed")
-        store.sync_catalog([descriptor_from_payload(CREATE_CAMPAIGN)])
+        store.sync_catalog([
+            descriptor_from_payload(CREATE_CAMPAIGN),
+            descriptor_from_payload(UPDATE_CAMPAIGN),
+        ])
         store.record_runtime_status(
             "hermes-plugin",
             {
                 "readiness_protocol": 1,
                 "resources": {"tier": "2c2g", "cpu_count": 2, "memory_total_mb": 2048},
                 "result_outbox": {"pending": 0, "bytes": 0, "over_limit": False},
-                "catalog_sync": {"ok": True, "tool_count": 1},
+                "catalog_sync": {"ok": True, "tool_count": 2},
             },
         )
         managed = service.create_managed_plan({
@@ -120,6 +148,7 @@ def main() -> int:
         assert managed["standing_authorization"]["automatic"] is True
         assert managed["task"]["status"] == "planned"
         assert managed["approval"]["status"] == "cancelled"
+        assert managed["activation"]["blocked"] == 1
 
         server = build_server(settings, store=store)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
