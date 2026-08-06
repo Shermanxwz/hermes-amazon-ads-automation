@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from amazon_ads_control.catalog import descriptor_from_payload
+from amazon_ads_control.sealed_activation import _advance_activation
 from helpers import Environment, one_target_snapshot
 
 CREATE_CAMPAIGN = {
@@ -170,6 +171,66 @@ class SealedActivationV6Tests(unittest.TestCase):
         })
         self.assertEqual(completed["activation_transition"]["state"], "completed")
         self.assertEqual(self.env.store.get_task(task_id)["status"], "completed")
+
+    def test_leaf_then_ad_group_then_campaign_release_order_is_strict(self):
+        profile = {"profile_id": "p1", "marketplace": "US", "country_code": "US", "currency": "USD"}
+        decisions = [
+            {"entity_type": "campaign", "entity_id": "AMZ-C", "action_type": "create_campaign", "plan_key": "create-c", "payload": {}},
+            {"entity_type": "ad_group", "entity_id": "AMZ-G", "action_type": "create_ad_group", "plan_key": "create-g", "payload": {}},
+            {"entity_type": "ad", "entity_id": "AMZ-A", "action_type": "create_ad", "plan_key": "create-a", "payload": {}},
+            {"entity_type": "ad", "entity_id": "AMZ-A", "action_type": "enable", "plan_key": "enable-a", "payload": {"activation_phase": True, "activation_rank": 10}},
+            {"entity_type": "ad_group", "entity_id": "AMZ-G", "action_type": "enable", "plan_key": "enable-g", "payload": {"activation_phase": True, "activation_rank": 20}},
+            {"entity_type": "campaign", "entity_id": "AMZ-C", "action_type": "enable", "plan_key": "enable-c", "payload": {"activation_phase": True, "activation_rank": 30}},
+        ]
+        cycle = self.env.store.create_cycle(
+            profile=profile, source="activation-order-test",
+            window={"start": None, "end": None, "grain": "structural-plan"},
+            data_quality={"eligible_for_writes": True}, kpis={}, snapshot={"profile": profile},
+            decisions=decisions, created_by="test",
+        )
+        rows = self.env.store.list_decisions(cycle_id=cycle["id"], limit=20)
+        by_key = {item["plan_key"]: item for item in rows}
+        task = self.env.store.create_task(
+            title="strict staged activation", kind="full-managed-sp-plan", created_by="test",
+            write_allowed=True, payload={}, cycle_id=cycle["id"],
+            decision_ids=[item["id"] for item in rows],
+        )
+        create_ids = [by_key[key]["id"] for key in ("create-c", "create-g", "create-a")]
+        activation_ids = [by_key[key]["id"] for key in ("enable-a", "enable-g", "enable-c")]
+        with self.env.store.connection() as conn:
+            conn.execute(
+                f"UPDATE decisions SET status='verified' WHERE id IN ({','.join('?' for _ in create_ids)})",
+                create_ids,
+            )
+            conn.execute(
+                f"UPDATE decisions SET status='blocked' WHERE id IN ({','.join('?' for _ in activation_ids)})",
+                activation_ids,
+            )
+
+        first = _advance_activation(self.env.store, task["id"])
+        self.assertEqual((first["state"], first["rank"]), ("activation_planned", 10))
+        self.assertEqual(self.env.store.get_decision(by_key["enable-a"]["id"])["status"], "planned")
+        self.assertEqual(self.env.store.get_decision(by_key["enable-g"]["id"])["status"], "blocked")
+        self.assertEqual(self.env.store.get_decision(by_key["enable-c"]["id"])["status"], "blocked")
+
+        with self.env.store.connection() as conn:
+            conn.execute("UPDATE decisions SET status='verified' WHERE id=?", (by_key["enable-a"]["id"],))
+        second = _advance_activation(self.env.store, task["id"])
+        self.assertEqual((second["state"], second["rank"]), ("activation_planned", 20))
+        self.assertEqual(self.env.store.get_decision(by_key["enable-g"]["id"])["status"], "planned")
+        self.assertEqual(self.env.store.get_decision(by_key["enable-c"]["id"])["status"], "blocked")
+
+        with self.env.store.connection() as conn:
+            conn.execute("UPDATE decisions SET status='verified' WHERE id=?", (by_key["enable-g"]["id"],))
+        third = _advance_activation(self.env.store, task["id"])
+        self.assertEqual((third["state"], third["rank"]), ("activation_planned", 30))
+        self.assertEqual(self.env.store.get_decision(by_key["enable-c"]["id"])["status"], "planned")
+
+        with self.env.store.connection() as conn:
+            conn.execute("UPDATE decisions SET status='verified' WHERE id=?", (by_key["enable-c"]["id"],))
+        final = _advance_activation(self.env.store, task["id"])
+        self.assertEqual(final["state"], "completed")
+        self.assertEqual(self.env.store.get_task(task["id"])["status"], "completed")
 
     def test_missing_atomic_activation_tool_rejects_create_before_task_exists(self):
         self.env.store.sync_catalog([descriptor_from_payload(CREATE_CAMPAIGN)])
