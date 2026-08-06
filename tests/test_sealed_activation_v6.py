@@ -174,13 +174,29 @@ class SealedActivationV6Tests(unittest.TestCase):
 
     def test_leaf_then_ad_group_then_campaign_release_order_is_strict(self):
         profile = {"profile_id": "p1", "marketplace": "US", "country_code": "US", "currency": "USD"}
+
+        def decision(entity_type, entity_id, action_type, plan_key, payload, priority):
+            return {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "action_type": action_type,
+                "priority": priority,
+                "rule_id": "sealed_activation_order_test",
+                "reason": "Verify strict leaf-to-Campaign activation release order",
+                "evidence": {},
+                "payload": payload,
+                "expected_family": entity_type,
+                "risk": "high",
+                "plan_key": plan_key,
+            }
+
         decisions = [
-            {"entity_type": "campaign", "entity_id": "AMZ-C", "action_type": "create_campaign", "plan_key": "create-c", "payload": {}},
-            {"entity_type": "ad_group", "entity_id": "AMZ-G", "action_type": "create_ad_group", "plan_key": "create-g", "payload": {}},
-            {"entity_type": "ad", "entity_id": "AMZ-A", "action_type": "create_ad", "plan_key": "create-a", "payload": {}},
-            {"entity_type": "ad", "entity_id": "AMZ-A", "action_type": "enable", "plan_key": "enable-a", "payload": {"activation_phase": True, "activation_rank": 10}},
-            {"entity_type": "ad_group", "entity_id": "AMZ-G", "action_type": "enable", "plan_key": "enable-g", "payload": {"activation_phase": True, "activation_rank": 20}},
-            {"entity_type": "campaign", "entity_id": "AMZ-C", "action_type": "enable", "plan_key": "enable-c", "payload": {"activation_phase": True, "activation_rank": 30}},
+            decision("campaign", "AMZ-C", "create_campaign", "create-c", {}, 100),
+            decision("ad_group", "AMZ-G", "create_ad_group", "create-g", {}, 90),
+            decision("ad", "AMZ-A", "create_ad", "create-a", {}, 80),
+            decision("ad", "AMZ-A", "enable", "enable-a", {"activation_phase": True, "activation_rank": 10}, 30),
+            decision("ad_group", "AMZ-G", "enable", "enable-g", {"activation_phase": True, "activation_rank": 20}, 20),
+            decision("campaign", "AMZ-C", "enable", "enable-c", {"activation_phase": True, "activation_rank": 30}, 10),
         ]
         cycle = self.env.store.create_cycle(
             profile=profile, source="activation-order-test",
@@ -192,7 +208,7 @@ class SealedActivationV6Tests(unittest.TestCase):
         by_key = {item["plan_key"]: item for item in rows}
         task = self.env.store.create_task(
             title="strict staged activation", kind="full-managed-sp-plan", created_by="test",
-            write_allowed=True, payload={}, cycle_id=cycle["id"],
+            parent_session_id=None, write_allowed=True, payload={}, cycle_id=cycle["id"],
             decision_ids=[item["id"] for item in rows],
         )
         create_ids = [by_key[key]["id"] for key in ("create-c", "create-g", "create-a")]
