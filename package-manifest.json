@@ -1,6 +1,6 @@
 {
   "package": "hermes-amazon-ads-automation",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "scope": "Amazon advertising-attributed ACOS operations only; Sponsored Products full-managed sealed autonomy",
   "runtime": {
     "control_plane": "Python 3.11+ standard library",
@@ -19,7 +19,10 @@
     "global exposure-neutral Campaign budget reallocation",
     "bounded Marketing Stream/hourly pacing",
     "automatic Sponsored Products standing authorization without per-plan approval flags",
-    "PAUSED-only autonomous Campaign creation inside the HERMES-SP namespace",
+    "PAUSED-only autonomous creation for Campaigns, Ad Groups, Product Ads, Targets and Keywords",
+    "live-Schema-proven atomic activation path required before accepting any autonomous create plan",
+    "independently verified leaf-to-Ad-Group-to-Campaign staged activation with Campaign enabled last",
+    "automatic task completion only after the final Campaign ENABLED state is independently read back",
     "reversible PAUSED/ENABLED lifecycle control with verified recovery",
     "exact live MCP initialize, paginated tools/list and JSON Schema manifest auditing",
     "deterministic Direct Ads API fallback routes for every required SP operation",
@@ -45,7 +48,7 @@
     "real 429 and timeout behavior without duplicate jobs or mutations",
     "owner AWS Marketing Stream delivery",
     "historical replay plus sustained OBSERVE shadow review",
-    "Amazon Ads Test Account or controlled real-account SP Campaign graph canary with independent readback",
+    "Amazon Ads Test Account or controlled real-account SP Campaign graph canary with staged activation and independent readback",
     "mature attribution-window canary review",
     "actual VPS HTTPS, reboot, storage soak and backup-restore drill"
   ]
