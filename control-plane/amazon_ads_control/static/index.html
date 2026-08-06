@@ -29,8 +29,8 @@
           <p id="generated">—</p>
         </div>
         <div class="top-actions">
-          <button id="refresh" class="secondary">刷新</button>
-          <button id="logout" class="secondary">退出</button>
+          <button id="refresh" type="button" class="secondary">刷新</button>
+          <button id="logout" type="button" class="secondary">退出</button>
         </div>
       </header>
 
@@ -47,9 +47,9 @@
             <span id="readiness-pill" class="status-pill">—</span>
           </div>
           <div class="mode-buttons" aria-label="运行模式">
-            <button data-mode="autopilot">全托管运行</button>
-            <button data-mode="observe" class="secondary">仅观察</button>
-            <button data-mode="paused" class="danger">暂停</button>
+            <button type="button" data-mode="autopilot">全托管运行</button>
+            <button type="button" data-mode="observe" class="secondary">仅观察</button>
+            <button type="button" data-mode="paused" class="danger">暂停</button>
           </div>
           <form id="strategy-form" class="strategy-form">
             <label><span>目标 ACOS</span><div class="input-suffix"><input id="target-acos" type="number" min="1" max="500" step="0.1"><b>%</b></div></label>
@@ -75,5 +75,6 @@
     </section>
   </main>
   <script src="/static/app.js"></script>
+  <script src="/static/app_v3.js"></script>
 </body>
 </html>
