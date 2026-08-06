@@ -16,13 +16,26 @@ CREATE_CAMPAIGN = {
                 "name": {"type": "string"}, "budget": {"type": "number", "minimum": 1},
                 "state": {"type": "string"}, "adProduct": {"type": "string"}}}}}}},
 }
+UPDATE_CAMPAIGN = {
+    "registered_name": "mcp_amazon_ads_campaign_management_update_campaign",
+    "native_name": "campaign_management-update_campaign",
+    "source": "hermes-registry:na",
+    "schema": {"description": "Update one Sponsored Products campaign", "parameters": {
+        "type": "object", "required": ["campaigns"], "properties": {"campaigns": {
+            "type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object",
+            "required": ["campaignId", "state"], "properties": {
+                "campaignId": {"type": "string"}, "state": {"type": "string"}}}}}}},
+}
 
 
 class FullManagedV5Tests(unittest.TestCase):
     def setUp(self):
         self.env = Environment()
         self.env.plan(one_target_snapshot())
-        self.env.store.sync_catalog([descriptor_from_payload(CREATE_CAMPAIGN)])
+        self.env.store.sync_catalog([
+            descriptor_from_payload(CREATE_CAMPAIGN),
+            descriptor_from_payload(UPDATE_CAMPAIGN),
+        ])
 
     def tearDown(self):
         self.env.close()
@@ -49,10 +62,14 @@ class FullManagedV5Tests(unittest.TestCase):
         self.assertEqual(result["task"]["status"], "planned")
         self.assertTrue(result["task"]["write_allowed"])
         self.assertEqual(result["approval"]["status"], "cancelled")
-        decision = self.env.store.list_decisions(task_id=result["task"]["id"])[0]
-        marker = decision["payload"]["standing_authorization"]
+        decisions = self.env.store.list_decisions(task_id=result["task"]["id"])
+        create = next(item for item in decisions if item["action_type"] == "create_campaign")
+        activation = next(item for item in decisions if item["payload"].get("activation_phase"))
+        marker = create["payload"]["standing_authorization"]
         self.assertEqual(marker["scope"], "sealed-sp")
-        self.assertFalse(decision["payload"]["approval_required"])
+        self.assertFalse(create["payload"]["approval_required"])
+        self.assertEqual(activation["status"], "blocked")
+        self.assertTrue(activation["payload"]["standing_authorization"]["verified_create"])
 
     def test_explicit_sp_plan_outside_envelope_is_rejected_not_downgraded(self):
         with self.assertRaisesRegex(ValueError, "namespace"):
