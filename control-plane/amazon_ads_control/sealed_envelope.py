@@ -24,6 +24,9 @@ ACTION_FAMILIES = {
     "create_negative_keyword": "target",
     "create_negative_target": "target",
 }
+PAUSED_CREATE_ACTIONS = {
+    "create_campaign", "create_ad_group", "create_ad", "create_target", "create_keyword",
+}
 
 
 def canonical(value: Any) -> str:
@@ -132,13 +135,13 @@ def standing_authorized(store: Any, decision: dict[str, Any], tool: dict[str, An
     if action in ACTION_FAMILIES and family != expected_family:
         return False, "live MCP family does not match the planned SP operation"
     state = str(first(args, "state", "status") or payload.get("after") or item.get("desired_state") or "").upper()
+    if action in PAUSED_CREATE_ACTIONS and state != "PAUSED":
+        return False, "autonomous delivery entities must be created PAUSED"
     if action == "create_campaign":
         name = str(first(args, "name", "campaignName") or "")
         budget = number(args, "budget", "dailyBudget", "budgetAmount")
         if not name.startswith(policy.sealed_sp_namespace + "-"):
             return False, "autonomous Campaign must use the configured namespace"
-        if state != "PAUSED":
-            return False, "autonomous Campaign must be created PAUSED"
         if budget is None or budget <= 0 or budget > float(policy.sealed_sp_max_campaign_budget):
             return False, "autonomous Campaign budget exceeds the envelope"
     elif action in {"pause", "disable", "enable", "resume", "update_state"}:
