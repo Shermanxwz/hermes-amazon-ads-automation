@@ -135,7 +135,18 @@ def main() -> int:
                 browser = playwright.chromium.launch(**launch)
                 context = browser.new_context(viewport={"width": 1440, "height": 1000})
                 page = context.new_page()
-                page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+
+                def capture_console(message) -> None:
+                    if message.type != "error":
+                        return
+                    # /health/ready intentionally returns 503 whenever the
+                    # controller is fail-closed (observe, paused, or phase one
+                    # of the two-step autopilot transition). UI state and the
+                    # readiness payload are asserted separately below.
+                    if "503 (Service Unavailable)" not in message.text:
+                        console_errors.append(message.text)
+
+                page.on("console", capture_console)
                 page.on("pageerror", lambda error: page_errors.append(str(error)))
                 response = page.goto(base, wait_until="networkidle")
                 assert response and response.ok

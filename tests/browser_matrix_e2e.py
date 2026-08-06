@@ -117,9 +117,14 @@ def exercise(browser_type: BrowserType, root: Path) -> None:
         browser = browser_type.launch(headless=True)
         context = browser.new_context(viewport={"width": 1100, "height": 780})
         page = context.new_page()
+
         def capture_console(message) -> None:
-            if message.type == "error":
-                (expected_fault_errors if fault_injection_active[0] else console_errors).append(message.text)
+            if message.type != "error":
+                return
+            if "503 (Service Unavailable)" in message.text:
+                return
+            (expected_fault_errors if fault_injection_active[0] else console_errors).append(message.text)
+
         page.on("console", capture_console)
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         stage = "initial-load"
