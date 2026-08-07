@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import tomllib
 import unittest
 
+from amazon_ads_control import __version__
 from amazon_ads_control.api import Handler
 from amazon_ads_control.extension_registry import EXTENSION_ORDER, installed_extensions
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ExtensionRegistryTests(unittest.TestCase):
@@ -39,7 +46,19 @@ class ExtensionRegistryTests(unittest.TestCase):
         self.assertEqual(EXTENSION_ORDER[-1], "sealed_activation_outcomes")
 
     def test_http_version_matches_package_generation(self):
-        self.assertEqual(Handler.server_version, "HermesAdsControl/4.0")
+        major, minor, *_ = __version__.split(".")
+        self.assertEqual(Handler.server_version, f"HermesAdsControl/{major}.{minor}")
+
+    def test_release_identity_is_consistent(self):
+        with (ROOT / "pyproject.toml").open("rb") as handle:
+            project_version = tomllib.load(handle)["project"]["version"]
+        manifest = json.loads((ROOT / "package-manifest.json").read_text(encoding="utf-8"))
+        manifest_version = manifest["version"]
+        self.assertEqual(project_version, manifest_version)
+        self.assertEqual(__version__, manifest_version)
+        current_state = (ROOT / "docs" / "current-state.md").read_text(encoding="utf-8")
+        self.assertIn(f"Package release {manifest_version}", current_state)
+        self.assertIn("sealed-operation/control-policy generation v6", current_state)
 
 
 if __name__ == "__main__":
