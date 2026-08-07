@@ -35,7 +35,7 @@ def install_extensions() -> tuple[str, ...]:
             installer()
             installed.append(name)
         from .api import Handler
-        Handler.server_version = "HermesAdsControl/4.0"
+        Handler.server_version = "HermesAdsControl/4.1"
         _INSTALLED = tuple(installed)
         return _INSTALLED
 

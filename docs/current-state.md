@@ -1,6 +1,6 @@
 # Current state
 
-Version 6.0 is an advertising-only, Sponsored Products full-managed ACOS autopilot.
+Package release 4.1.0 implements sealed-operation/control-policy generation v6: an advertising-only, Sponsored Products full-managed ACOS autopilot.
 
 The normal user path has no per-plan approval. Any exact SP plan inside the profile-bound sealed envelope is automatically released; the caller no longer supplies `standing_authorization`. An explicitly Sponsored Products plan that violates namespace, PAUSED-create, budget, ASIN, state, family, region or schema boundaries is rejected rather than downgraded into an approval request.
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-amazon-ads-control"
-version = "4.0.0"
+version = "4.1.0"
 description = "Ads-only full-managed probabilistic ACOS autopilot with sealed SP autonomy, atomic execution and independent verification"
 requires-python = ">=3.11"
 license = "MIT"
