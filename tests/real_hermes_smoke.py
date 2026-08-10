@@ -105,6 +105,7 @@ def main() -> int:
             assert status.get("error") is None, status
             assert status["role"] == "main", status
             assert status["mode"] == "observe", status
+            assert "budget_guard" in status, status
 
             note_handler = _entry_handler(registry.get_entry("ads_control_record_note"))
             note = json.loads(note_handler({
@@ -142,12 +143,15 @@ def main() -> int:
             skill = destination / "skill" / "SKILL.md"
             assert skill.is_file()
             text = skill.read_text(encoding="utf-8")
-            assert "Approval-Gated Full Autopilot" in text
+            assert "Budget-Bounded Full-Managed ACOS Autopilot v6.1" in text
+            assert "budget-bounded autonomy" in text.lower()
+            assert "HERMES-SP-EXP-*" in text
+            assert "different read-only Verifier" in text
             assert "authenticated Amazon Ads Control Web" in text
             print(
                 f"real-hermes-smoke: OK ({len(expected_tools)} tools, "
                 f"{len(loaded.hooks_registered)} hooks, {len(loaded.commands_registered)} commands, "
-                "live control context/note/catalog, Web-only approval default)"
+                "live control context/note/catalog, budget-bounded sealed autonomy)"
             )
         finally:
             server.shutdown()
