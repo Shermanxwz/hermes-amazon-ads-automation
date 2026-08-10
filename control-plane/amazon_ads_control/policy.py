@@ -47,7 +47,11 @@ def redact_text(value: str) -> str:
 
 
 def redact(value: Any, *, depth: int = 0) -> Any:
-    if depth > 5:
+    # Amazon Ads MCP/API responses commonly wrap useful values 6-8 levels deep
+    # (for example Campaign monetaryBudgetValue). Preserve enough structure for
+    # verifier/budget evidence while keeping the existing 100-item/key caps and
+    # redacting secret-bearing keys at every visited level.
+    if depth > 10:
         return "[truncated]"
     if isinstance(value, dict):
         out = {}
