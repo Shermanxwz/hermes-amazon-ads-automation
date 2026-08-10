@@ -12,7 +12,7 @@ EXTENSION_ORDER: Final[tuple[str, ...]] = (
     "write_batch_hardening", "approval_contract_fixes", "sealed_autonomy",
     "hermes_compat", "hermes_lifecycle", "http_disconnect_hardening",
     "verification_hardening", "sealed_activation", "sealed_activation_trust",
-    "sealed_activation_outcomes",
+    "sealed_activation_outcomes", "budget_guard",
 )
 
 _LOCK = threading.Lock()
@@ -35,7 +35,7 @@ def install_extensions() -> tuple[str, ...]:
             installer()
             installed.append(name)
         from .api import Handler
-        Handler.server_version = "HermesAdsControl/4.1"
+        Handler.server_version = "HermesAdsControl/4.2.1"
         _INSTALLED = tuple(installed)
         return _INSTALLED
 
