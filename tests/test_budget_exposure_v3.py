@@ -15,6 +15,10 @@ class BudgetExposureV3Tests(unittest.TestCase):
             "mode": "autopilot",
             "execution_enabled": True,
             "max_profile_daily_budget_increase_pct": 10,
+            # This test isolates the older cumulative +10% guard. Give the new
+            # account hard cap enough headroom, but still prove it has a fresh
+            # full-account Campaign budget observation before either write.
+            "max_daily_ad_spend": 1000,
         })
 
     def tearDown(self):
@@ -35,6 +39,19 @@ class BudgetExposureV3Tests(unittest.TestCase):
         task = self.env.service.create_task({"cycle_id": cycle["id"]}, "main")
         decisions = {item["entity_id"]: item for item in self.env.store.list_decisions(task_id=task["id"])}
         self.assertEqual(set(decisions), {"c1", "c2"})
+
+        self.env.store.record_action(
+            task_id=None, session_id="main-budget-read", actor_role="main", phase="after",
+            tool_name=READ_CAMPAIGN["registered_name"], operation="read", allowed=True,
+            args={"body": {"accessRequestedAccount": {"profileId": "p1"}}},
+            success=True, outcome_status="COMPLETED", structured_result=True,
+            reason="fresh full account campaign budget observation", result_summary="2 campaigns",
+            result={"campaigns": [
+                {"campaignId": "c1", "budget": 100, "state": "ENABLED"},
+                {"campaignId": "c2", "budget": 100, "state": "ENABLED"},
+            ]}, duration_ms=1,
+        )
+
         self.env.service.bind_worker({"task_id": task["id"], "worker_session_id": "exec", "role": "executor", "goal": "executor"})
 
         for index, campaign_id in enumerate(("c1", "c2"), start=1):
