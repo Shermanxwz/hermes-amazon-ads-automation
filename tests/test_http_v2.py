@@ -66,6 +66,12 @@ class HttpV2Tests(unittest.TestCase):
         self.assertIn("本页怎么理解",html); self.assertIn("Main 主控",html); self.assertIn("仅观察",html)
         self.assertIn("报告生命周期",html); self.assertIn("写前必须重新读取并匹配原值",html)
         self.assertIn("只在同一实体对象内核对全部预期字段",html)
+        self.assertIn("后台编排器",html)
+        self.assertIn("orchestrator-status",html)
+        with build_opener().open(self.base+"/static/app.js") as response:
+            script=response.read().decode(); self.assertEqual(response.status,200)
+        self.assertIn("已隔离",script)
+        self.assertNotIn('const failed = Number(reports.FAILED || 0) + Number(reports.QUARANTINED || 0);',script)
         with build_opener().open(self.base+"/static/app_v3.js") as response:
             script=response.read().decode(); self.assertEqual(response.status,200)
         self.assertIn("result_outbox_pending",script); self.assertIn("runtime_status",script)

@@ -1,0 +1,26 @@
+[Unit]
+Description=Hermes Amazon Ads US-only daily orchestrator
+After=network-online.target amazon-ads-control.service hermes-studio.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/hermes-amazon-ads-automation
+Environment=HOME=/var/lib/hermes-studio
+EnvironmentFile=/etc/hermes-amazon-ads-control.env
+Environment=ADS_MCP_DEFAULT_REGION=na
+Environment=ADS_MCP_TOOLSETS=mcp-amazon-ads
+ExecStartPre=/opt/hermes-amazon-ads-automation/scripts/refresh_amazon_ads_token.sh
+ExecStart=/bin/bash /opt/hermes-amazon-ads-automation/scripts/us-only-daily-orchestrator.sh
+TimeoutStartSec=1800
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/hermes-studio /var/lib/hermes-amazon-ads-control /run/lock
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

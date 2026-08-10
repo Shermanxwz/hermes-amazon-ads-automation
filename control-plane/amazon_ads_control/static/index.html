@@ -61,6 +61,20 @@
         <section id="kpis" class="kpi-grid" aria-label="核心指标"></section>
       </section>
 
+      <section class="panel orchestrator-panel" aria-label="后台编排器状态">
+        <div class="section-title">
+          <div><h2>后台编排器</h2><p>仅运营 US · 4498826511098550；报告完成后自动继续全链路</p></div>
+          <span id="orchestrator-status" class="status-pill">—</span>
+        </div>
+        <div class="orchestrator-grid">
+          <div><span class="muted">当前阶段</span><strong id="orchestrator-stage">—</strong></div>
+          <div><span class="muted">报告队列</span><strong id="orchestrator-reports">—</strong></div>
+          <div><span class="muted">活动任务</span><strong id="orchestrator-tasks">—</strong></div>
+          <div><span class="muted">最近心跳</span><strong id="orchestrator-heartbeat">—</strong></div>
+        </div>
+        <div id="orchestrator-detail" class="orchestrator-detail">等待状态更新</div>
+      </section>
+
       <section class="panel trend-panel">
         <div class="section-title"><div><h2>ACOS 趋势</h2><p>最近周期的广告归因表现与目标线</p></div><span id="trend-summary" class="muted">—</span></div>
         <div id="trend-chart" class="trend-chart" role="img" aria-label="ACOS 趋势图"></div>

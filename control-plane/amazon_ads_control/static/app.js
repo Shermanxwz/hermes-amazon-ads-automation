@@ -208,17 +208,58 @@ function renderHealth() {
   const counts = reports.counts || {};
   const pendingReports = ["REQUESTED", "SUBMITTED", "IN_PROGRESS", "SUCCEEDED", "DOWNLOADED", "VALIDATED"]
     .reduce((total, key) => total + Number(counts[key] || 0), 0);
-  const failedReports = Number(counts.FAILED || 0) + Number(counts.QUARANTINED || 0);
+  const failedReports = Number(counts.FAILED || 0);
+  const quarantinedReports = Number(counts.QUARANTINED || 0);
   const storage = dashboard.storage || {};
   const pressure = storage.latest_maintenance?.pressure || "normal";
   $("#execution-health").textContent = readiness?.writable ? "执行 可写" : `执行 ${String(readiness?.operational_state || "等待").toUpperCase()}`;
   $("#execution-health").className = readinessClass(String(readiness?.operational_state || ""));
   $("#catalog-health").textContent = `MCP ${number(catalog.tools, 0)} 工具 / ${number(catalog.drifted, 0)} 漂移`;
   $("#catalog-health").className = catalog.tools && !catalog.drifted ? "good" : "warn";
-  $("#report-health").textContent = failedReports ? `报告 ${failedReports} 异常` : pendingReports ? `报告 ${pendingReports} 处理中` : "报告 正常";
+  $("#report-health").textContent = failedReports
+    ? `报告 ${failedReports} 异常`
+    : quarantinedReports
+      ? `报告正常 · ${quarantinedReports} 个已隔离`
+      : pendingReports
+        ? `报告 ${pendingReports} 处理中`
+        : "报告 正常";
   $("#report-health").className = failedReports ? "bad" : pendingReports ? "warn" : "good";
   $("#storage-health").textContent = `存储 ${number(storage.files?.total_mb || 0)}MB`;
   $("#storage-health").className = pressure === "hard" ? "bad" : pressure === "soft" ? "warn" : "good";
+}
+
+function renderOrchestrator() {
+  const reports = dashboard.reports?.counts || {};
+  const waiting = ["REQUESTED", "SUBMITTED", "IN_PROGRESS"]
+    .reduce((total, key) => total + Number(reports[key] || 0), 0);
+  const readyToDownload = Number(reports.SUCCEEDED || 0);
+  const ingested = Number(reports.INGESTED || 0);
+  const failed = Number(reports.FAILED || 0);
+  const quarantined = Number(reports.QUARANTINED || 0);
+  const tasks = dashboard.task_counts || {};
+  const activeTasks = Number(tasks.queued || 0) + Number(tasks.running || 0) + Number(tasks.awaiting_approval || 0);
+  const workers = (dashboard.workers || []).filter(item => item.status === "running");
+  const latestEvent = (dashboard.recent_events || [])[0];
+  const blocked = readiness?.blocking_checks || [];
+  const status = failed ? "异常" : readiness?.writable ? "运行中" : blocked.length ? "等待条件" : "已连接";
+  const statusValue = failed ? "failed" : readiness?.writable ? "ready" : blocked.length ? "blocked" : "connected";
+  const stage = failed ? "处理异常报告" : readyToDownload ? "下载并校验报告" : waiting ? "等待报告完成" : activeTasks ? "执行任务" : ingested ? "等待下一轮数据" : "初始化";
+  const detail = failed
+    ? `${failed} 个报告需要处理`
+    : quarantined
+      ? `${quarantined} 个非运营范围报告已隔离，不影响 US-only 运行`
+      : readyToDownload
+        ? `${readyToDownload} 个报告已完成，等待下载和入库`
+        : blocked.length
+          ? `等待：${blocked.slice(0, 2).join("、")}`
+          : latestEvent?.message || "后台编排器会在下一次轮询时继续";
+  $("#orchestrator-status").textContent = status;
+  $("#orchestrator-status").className = `status-pill ${statusClass(statusValue)}`;
+  $("#orchestrator-stage").textContent = stage;
+  $("#orchestrator-reports").textContent = `${waiting} 等待 · ${readyToDownload} 待下载 · ${ingested} 已入库`;
+  $("#orchestrator-tasks").textContent = activeTasks ? `${activeTasks} 活动` : "无活动任务";
+  $("#orchestrator-heartbeat").textContent = workers.length ? "正常" : "待连接";
+  $("#orchestrator-detail").textContent = detail;
 }
 
 function render() {
@@ -242,6 +283,7 @@ function render() {
   renderTrend();
   renderFeeds();
   renderHealth();
+  renderOrchestrator();
 }
 
 async function readinessStatus() {

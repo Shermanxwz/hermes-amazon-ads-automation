@@ -13,7 +13,12 @@ from . import client, outbox, resources, schemas, tools
 
 PREFIX = "mcp_amazon_ads_"
 TOOLSET = "mcp-amazon-ads"
-TOOLSET_PATTERN = re.compile(r"^mcp-amazon-ads(?:-(na|eu|fe))?$", re.I)
+# Accept either the MCP-style toolset name ("mcp-amazon-ads[-na|-eu|-fe]") or
+# the raw configured server name ("amazon-ads" / "amazon-ads-na" / ...). The
+# Hermes worker registers MCP tools under both the mcp- prefixed toolset name
+# and a raw alias equal to the server config key. Without the alias match the
+# plugin would always report amazon_ads_toolset_empty even though tools exist.
+TOOLSET_PATTERN = re.compile(r"^(?:mcp-)?amazon-ads(?:-(na|eu|fe))?$", re.I)
 TASK_MARKER = re.compile(r"\[ads-task:([a-f0-9]{8,32})\]", re.I)
 ROLE_MARKER = re.compile(r"\[ads-role:(executor|verifier)\]", re.I)
 _CATALOG_LOCK = threading.Lock()
@@ -51,7 +56,14 @@ def _configured_toolsets(registry) -> list[str]:
     )
     matching = [name for name in available if TOOLSET_PATTERN.fullmatch(str(name))]
     if configured:
-        matching = [name for name in matching if name in configured]
+        def _same_toolset(left: str, right: str) -> bool:
+            left = left.removeprefix("mcp-")
+            right = right.removeprefix("mcp-")
+            return left == right
+        matching = [
+            name for name in matching
+            if any(_same_toolset(name, wanted) for wanted in configured)
+        ]
     return sorted(set(matching))
 
 
@@ -69,7 +81,34 @@ def _registry_catalog() -> list[dict[str, Any]]:
         region = (match.group(1) or default_region).lower()
         server_name = toolset[len("mcp-"):]
         registered_prefix = "mcp_" + re.sub(r"[^a-z0-9]+", "_", server_name.lower()) + "_"
-        for name in sorted(registry.get_tool_names_for_toolset(toolset)):
+        lookup_toolsets = [toolset]
+        if toolset.startswith("mcp-"):
+            lookup_toolsets.append(toolset[len("mcp-"):])
+        else:
+            lookup_toolsets.append("mcp-" + toolset)
+        names: set[str] = set()
+        for lookup in lookup_toolsets:
+            names.update(registry.get_tool_names_for_toolset(lookup))
+        # During Gateway startup the plugin hook can run before the MCP server's
+        # toolset index is populated, even though MCP tools are already present
+        # in the live registry. Fall back to the canonical MCP name prefix so a
+        # transient ordering race cannot produce a false empty catalog.
+        if not names and hasattr(registry, "get_tool_to_toolset_map"):
+            tool_map = registry.get_tool_to_toolset_map()
+            names.update(
+                name for name, owner in tool_map.items()
+                if str(owner) in lookup_toolsets
+                or str(owner).removeprefix("mcp-") in {
+                    str(item).removeprefix("mcp-") for item in lookup_toolsets
+                }
+                or name.startswith("mcp_amazon_ads_")
+            )
+        if not names and hasattr(registry, "get_all_tool_names"):
+            names.update(
+                name for name in registry.get_all_tool_names()
+                if name.startswith(registered_prefix)
+            )
+        for name in sorted(names):
             if not name.startswith(registered_prefix):
                 continue
             rows.append({
@@ -83,6 +122,18 @@ def _registry_catalog() -> list[dict[str, Any]]:
                 "schema": registry.get_schema(name) or {},
                 "enabled": True,
             })
+    if not rows:
+        try:
+            from tools.registry import registry as _debug_registry
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning(
+                "Amazon catalog empty diagnostic: configured=%r available=%r prefix_matches=%d",
+                sorted(os.getenv("ADS_MCP_TOOLSETS", "").split(",")),
+                _debug_registry.get_registered_toolset_names(),
+                sum(1 for item in _debug_registry.get_tool_to_toolset_map() if item.startswith("mcp_amazon_ads_")),
+            )
+        except Exception as _debug_exc:
+            pass
     return rows
 
 
@@ -100,6 +151,23 @@ def sync_live_catalog(force: bool = False) -> dict[str, Any]:
         except Exception as exc:
             return {"error": "hermes_registry_unavailable", "detail": str(exc)}
         if not rows:
+            # A gateway can successfully discover/register the live MCP tools
+            # while this plugin hook sees an empty dynamic registry snapshot.
+            # Do not fail closed when the control plane already has a fresh,
+            # drift-free catalog; reuse that verified catalog and keep the
+            # readiness heartbeat alive. A non-empty/drifted catalog still
+            # fails closed as before.
+            existing = client.context("")
+            catalog = existing.get("catalog") if isinstance(existing, dict) else {}
+            if isinstance(catalog, dict) and int(catalog.get("tools") or 0) > 0 and int(catalog.get("drifted") or 0) == 0:
+                result = {
+                    "ok": True,
+                    "cached": True,
+                    "source": "control-plane-existing-catalog",
+                    "tool_count": int(catalog.get("tools") or 0),
+                }
+                client._LATEST_CATALOG_SYNC = dict(result)
+                return result
             return {
                 "error": "amazon_ads_toolset_empty",
                 "toolsets": ["mcp-amazon-ads", "mcp-amazon-ads-na", "mcp-amazon-ads-eu", "mcp-amazon-ads-fe"],

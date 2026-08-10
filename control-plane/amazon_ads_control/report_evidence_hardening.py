@@ -24,6 +24,16 @@ def _walk(value: Any):
     elif isinstance(value, list):
         for item in value:
             yield from _walk(item)
+    elif isinstance(value, str):
+        # MCP tool adapters may serialize a CallToolResult payload as a JSON
+        # string inside the outer result object. Parse nested JSON so reportId
+        # evidence remains bindable to the persistent report job.
+        candidate = value.strip()
+        if candidate.startswith("{") or candidate.startswith("["):
+            try:
+                yield from _walk(json.loads(candidate))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
 
 
 def _key(value: str) -> str:
@@ -40,7 +50,7 @@ def _report_ids(value: Any) -> set[str]:
 
 
 def _row_count(snapshot: dict[str, Any]) -> int:
-    levels = ("campaigns", "targets", "search_terms", "placements", "budget_usage", "recommendations", "hourly")
+    levels = ("campaigns", "targets", "search_terms", "placements", "budget_usage", "recommendations", "hourly", "rows")
     return sum(len(snapshot.get(level, [])) for level in levels if isinstance(snapshot.get(level), list))
 
 
