@@ -1,5 +1,5 @@
 /*
- * Full-managed runtime-mode controller.
+ * Full-managed runtime-mode and budget controller.
  * Historical compatibility names are intentionally retained for release tests:
  * result_outbox_pending, runtime_status.
  */
@@ -55,4 +55,52 @@ const runtime_status = null;
       mutate(button, () => updateRuntimeMode(mode), labels[mode]).catch(() => {});
     });
   });
+
+  const oldRender = render;
+  render = function renderV421() {
+    oldRender();
+    const settings = dashboard.settings || {};
+    const budget = dashboard.budget_guard || {};
+    const currency = dashboard.profiles?.[0]?.currency || "账户货币";
+    const daily = document.querySelector("#max-daily-ad-spend");
+    const explore = document.querySelector("#exploration-budget-pct");
+    if (daily) daily.value = settings.max_daily_ad_spend ?? 100;
+    if (explore) explore.value = settings.exploration_budget_pct ?? 20;
+    const currencyNode = document.querySelector("#daily-currency-label");
+    if (currencyNode) currencyNode.textContent = currency;
+
+    const exposure = document.querySelector("#budget-exposure");
+    const remaining = document.querySelector("#budget-remaining");
+    const exploration = document.querySelector("#exploration-remaining");
+    const state = document.querySelector("#budget-guard-state");
+    if (exposure) exposure.textContent = `${number(budget.projected_exposure, 2)} / ${number(budget.hard_cap, 2)} ${currency}`;
+    if (remaining) remaining.textContent = `${number(budget.remaining, 2)} ${currency}`;
+    if (exploration) exploration.textContent = `${number(budget.exploration_remaining, 2)} / ${number(budget.exploration_cap, 2)} ${currency}`;
+    if (state) {
+      const safe = budget.fresh && Number(budget.projected_exposure || 0) < Number(budget.hard_cap || 0);
+      state.textContent = budget.fresh ? (budget.exploration_allowed ? "可探索" : budget.increase_allowed ? "保守运行" : "仅降风险") : "等待实时预算读取";
+      state.className = safe ? "good" : "warn";
+      state.title = budget.reason || "";
+    }
+  };
+
+  const budgetForm = document.querySelector("#budget-form");
+  if (budgetForm) {
+    budgetForm.addEventListener("submit", event => {
+      event.preventDefault();
+      const button = event.currentTarget.querySelector("button");
+      mutate(button, async () => {
+        const cap = Number(document.querySelector("#max-daily-ad-spend").value);
+        const pct = Number(document.querySelector("#exploration-budget-pct").value);
+        if (!Number.isFinite(cap) || cap < 1) throw new Error("每日总预算必须大于 0");
+        if (!Number.isFinite(pct) || pct < 0 || pct > 100) throw new Error("探索预算比例必须在 0% 到 100% 之间");
+        await api("/api/settings", {
+          method: "PUT",
+          body: JSON.stringify({max_daily_ad_spend: cap, exploration_budget_pct: pct}),
+        });
+        document.querySelector("#budget-message").textContent = "已保存";
+        await refresh();
+      }, "每日预算硬上限已更新").catch(() => {});
+    });
+  }
 })();
