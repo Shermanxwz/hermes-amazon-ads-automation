@@ -30,14 +30,13 @@ class BudgetGuardV421Tests(unittest.TestCase):
     def tearDown(self):
         self.env.close()
 
-    def live_read(self, *budgets: float, created_at: str | None = None, next_token: str | None = None) -> int:
-        campaigns = []
-        for index, amount in enumerate(budgets, 1):
-            campaigns.append({
-                "campaignId": f"c{index}",
-                "state": "ENABLED",
-                "budgets": [{"budgetValue": {"monetaryBudgetValue": {"monetaryBudget": {"value": amount}}}}],
-            })
+    def record_campaigns(
+        self,
+        campaigns: list[dict],
+        *,
+        created_at: str | None = None,
+        next_token: str | None = None,
+    ) -> int:
         result = {"campaigns": campaigns}
         if next_token:
             result["nextToken"] = next_token
@@ -54,11 +53,29 @@ class BudgetGuardV421Tests(unittest.TestCase):
                 conn.execute("UPDATE actions SET created_at=? WHERE id=?", (created_at, action_id))
         return action_id
 
-    def add_campaign_decision(self, budget: float, *, exploration: bool = False):
+    def live_read(
+        self,
+        *budgets: float,
+        created_at: str | None = None,
+        next_token: str | None = None,
+        states: tuple[str, ...] | None = None,
+    ) -> int:
+        campaigns = []
+        for index, amount in enumerate(budgets, 1):
+            state = states[index - 1] if states and index <= len(states) else "ENABLED"
+            campaigns.append({
+                "campaignId": f"c{index}",
+                "state": state,
+                "budgets": [{"budgetValue": {"monetaryBudgetValue": {"monetaryBudget": {"value": amount}}}}],
+            })
+        return self.record_campaigns(campaigns, created_at=created_at, next_token=next_token)
+
+    def add_campaign_decision(self, budget: float, *, exploration: bool = False, plan_key: str | None = None):
+        key = plan_key or f"create-{budget}-{exploration}"
         raw = {
-            "entity_type": "campaign", "entity_id": "planned:test", "action_type": "create_campaign",
+            "entity_type": "campaign", "entity_id": f"planned:{key}", "action_type": "create_campaign",
             "priority": 50, "rule_id": "budget-test", "reason": "bounded experiment",
-            "evidence": {}, "expected_family": "campaign", "risk": "medium", "plan_key": f"create-{budget}-{exploration}",
+            "evidence": {}, "expected_family": "campaign", "risk": "medium", "plan_key": key,
             "payload": {
                 "approved_args": {"campaigns": [{
                     "name": "HERMES-SP-EXP-test" if exploration else "HERMES-SP-test",
@@ -74,11 +91,33 @@ class BudgetGuardV421Tests(unittest.TestCase):
         )
         return self.env.store.list_decisions(cycle_id=cycle["id"])[0]
 
+    def add_state_decision(self, campaign_id: str, state: str, *, action_type: str = "update_state"):
+        raw = {
+            "entity_type": "campaign", "entity_id": campaign_id, "action_type": action_type,
+            "priority": 40, "rule_id": "state-test", "reason": "state transition",
+            "evidence": {}, "expected_family": "campaign", "risk": "medium",
+            "plan_key": f"state-{campaign_id}-{state.lower()}",
+            "payload": {"approved_args": {"campaignId": campaign_id, "state": state}},
+        }
+        cycle = self.env.store.create_cycle(
+            profile={"profile_id": "p1", "marketplace": "US", "country_code": "US", "currency": "USD"},
+            source="budget-test", window={"start": "2026-08-01", "end": "2026-08-01", "grain": "daily"},
+            data_quality={}, kpis={}, snapshot={}, decisions=[raw], created_by="test",
+        )
+        return self.env.store.list_decisions(cycle_id=cycle["id"])[0]
+
     def attach_task(self, decision: dict) -> tuple[dict, dict]:
         task = self.env.service.create_task({"cycle_id": decision["cycle_id"]}, "test-main")
         current = self.env.store.get_decision(decision["id"])
         assert current is not None
         return task, current
+
+    def reserve(self, task: dict, decision: dict, session: str = "exec") -> dict:
+        return self.env.store.reserve_decision(
+            decision["id"], task["id"], session, 900,
+            cooldown_seconds=0, max_actions_per_task=50,
+            max_actions_per_day=250, max_campaign_creates_per_day=10,
+        )
 
     def reserve_directly(self, decision_id: str) -> None:
         now = datetime.now(UTC).isoformat(timespec="seconds")
@@ -99,6 +138,14 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.assertAlmostEqual(state["remaining"], 50.0)
         self.assertTrue(state["increase_allowed"])
         self.assertTrue(state["exploration_allowed"])
+
+    def test_historical_paused_campaign_budget_does_not_block_current_exposure(self):
+        self.live_read(10, 500, states=("ENABLED", "PAUSED"))
+        state = budget_guard.budget_status(self.env.store, "p1", require_fresh=True)
+        self.assertEqual(state["observed_campaign_budget_sum"], 10)
+        self.assertEqual(state["observed_exposure"], 20)
+        self.assertEqual(state["observation"]["all_campaign_budget_sum"], 510)
+        self.assertTrue(state["increase_allowed"])
 
     def test_paginated_campaign_read_is_not_accepted_as_full_budget_observation(self):
         self.live_read(15, next_token="more")
@@ -137,6 +184,28 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.assertFalse(state["increase_allowed"])
         self.assertIn("complete unpaginated", state["reason"])
 
+    def test_pause_reservation_does_not_require_budget_read(self):
+        task, decision = self.attach_task(self.add_state_decision("c-risk", "PAUSED", action_type="update_state"))
+        reserved = self.reserve(task, decision)
+        self.assertEqual(reserved["status"], "reserved")
+
+    def test_enable_reserves_observed_paused_campaign_budget(self):
+        self.env.store.update_settings({"max_daily_ad_spend": 100, "budget_guard_conservative_pct": 100.0})
+        self.live_read(20, states=("PAUSED",))
+        task, decision = self.attach_task(self.add_state_decision("c1", "ENABLED", action_type="enable"))
+        reserved = self.reserve(task, decision)
+        self.assertEqual(reserved["status"], "reserved")
+        state = budget_guard.budget_status(self.env.store, "p1")
+        self.assertEqual(state["observed_campaign_budget_sum"], 0)
+        self.assertEqual(state["committed_campaign_budget_delta_today"], 20)
+        self.assertEqual(state["projected_exposure"], 40)
+
+    def test_enable_missing_campaign_budget_is_fail_closed(self):
+        self.live_read(10)
+        task, decision = self.attach_task(self.add_state_decision("not-in-read", "ENABLED", action_type="enable"))
+        with self.assertRaisesRegex(ValueError, "missing from the fresh complete budget observation"):
+            self.reserve(task, decision)
+
     def test_reserved_campaign_reserves_budget_and_exploration_pool(self):
         self.live_read(20)
         decision = self.add_campaign_decision(5, exploration=True)
@@ -147,6 +216,62 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.assertEqual(state["projected_exposure"], 50)
         self.assertEqual(state["exploration_committed_today"], 10)
         self.assertEqual(state["exploration_remaining"], 10)
+
+    def test_created_paused_campaign_keeps_budget_reserved_until_activation_finishes(self):
+        now = datetime.now(UTC).replace(microsecond=0)
+        create_action = {
+            "entity_type": "campaign", "entity_id": "planned:new", "action_type": "create_campaign",
+            "priority": 50, "rule_id": "budget-test", "reason": "create paused graph",
+            "evidence": {}, "expected_family": "campaign", "risk": "medium", "plan_key": "new",
+            "payload": {"approved_args": {"campaigns": [{
+                "name": "HERMES-SP-new", "budget": 5, "state": "PAUSED", "adProduct": "SPONSORED_PRODUCTS",
+            }]}},
+        }
+        enable_action = {
+            "entity_type": "campaign", "entity_id": "{{decision:new.entity_id}}", "action_type": "enable",
+            "priority": 10, "rule_id": "activation", "reason": "staged activation",
+            "evidence": {}, "expected_family": "campaign", "risk": "medium", "plan_key": "new:verified-enable",
+            "payload": {
+                "approved_args": {"campaignId": "{{decision:new.entity_id}}", "state": "ENABLED"},
+                "activation_phase": True,
+                "activation_source_plan_key": "new",
+                "activation_rank": 30,
+            },
+        }
+        cycle = self.env.store.create_cycle(
+            profile={"profile_id": "p1", "marketplace": "US", "country_code": "US", "currency": "USD"},
+            source="budget-test", window={"start": "2026-08-01", "end": "2026-08-01", "grain": "daily"},
+            data_quality={}, kpis={}, snapshot={}, decisions=[create_action, enable_action], created_by="test",
+        )
+        task = self.env.service.create_task({"cycle_id": cycle["id"]}, "test-main")
+        rows = {item["plan_key"]: item for item in self.env.store.list_decisions(task_id=task["id"])}
+        create = rows["new"]
+        with self.env.store.connection() as conn:
+            conn.execute(
+                "UPDATE decisions SET status='verified',entity_id='c-new',executed_at=?,verified_at=? WHERE id=?",
+                ((now - timedelta(seconds=2)).isoformat(), (now - timedelta(seconds=2)).isoformat(), create["id"]),
+            )
+            conn.execute(
+                "UPDATE decisions SET status='blocked' WHERE id=?",
+                (rows["new:verified-enable"]["id"],),
+            )
+        self.record_campaigns([{
+            "campaignId": "c-new", "state": "PAUSED",
+            "budgets": [{"budgetValue": {"monetaryBudgetValue": {"monetaryBudget": {"value": 5}}}}],
+        }], created_at=(now - timedelta(seconds=1)).isoformat())
+        waiting = budget_guard.budget_status(self.env.store, "p1")
+        self.assertEqual(waiting["observed_campaign_budget_sum"], 0)
+        self.assertEqual(waiting["committed_campaign_budget_delta_today"], 5)
+        self.assertEqual(waiting["projected_exposure"], 10)
+
+        self.record_campaigns([{
+            "campaignId": "c-new", "state": "ENABLED",
+            "budgets": [{"budgetValue": {"monetaryBudgetValue": {"monetaryBudget": {"value": 5}}}}],
+        }], created_at=(now + timedelta(seconds=1)).isoformat())
+        enabled = budget_guard.budget_status(self.env.store, "p1")
+        self.assertEqual(enabled["observed_campaign_budget_sum"], 5)
+        self.assertEqual(enabled["committed_campaign_budget_delta_today"], 0)
+        self.assertEqual(enabled["projected_exposure"], 10)
 
     def test_newer_live_read_absorbs_executed_budget_delta_without_double_count(self):
         base_time = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=3)
@@ -205,8 +330,6 @@ class BudgetGuardV421Tests(unittest.TestCase):
         for thread in threads:
             thread.join()
 
-        # 60 observed + 70/72 for the first reservation is safe; adding the
-        # second would produce 202+ worst-case daily spend exposure.
         self.assertEqual(sum(kind == "ok" for kind, _ in outcomes), 1, outcomes)
         blocked = [detail for kind, detail in outcomes if kind == "blocked"]
         self.assertEqual(len(blocked), 1, outcomes)
@@ -223,11 +346,7 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.live_read(10, next_token="page-2")
         task, decision = self.attach_task(self.add_campaign_decision(5))
         with self.assertRaisesRegex(ValueError, "complete unpaginated"):
-            self.env.store.reserve_decision(
-                decision["id"], task["id"], "exec", 900,
-                cooldown_seconds=0, max_actions_per_task=50,
-                max_actions_per_day=250, max_campaign_creates_per_day=2,
-            )
+            self.reserve(task, decision)
 
     def test_daily_budget_hard_cap_and_overdelivery_multiplier_are_locked(self):
         with self.assertRaisesRegex(ValueError, "locked safety invariant"):
