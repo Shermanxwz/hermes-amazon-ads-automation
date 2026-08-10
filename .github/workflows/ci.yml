@@ -25,7 +25,7 @@ jobs:
         with: {python-version: "${{ matrix.python }}"}
       - run: python -m pip install coverage==7.13.3
       - run: bash scripts/coverage.sh
-        env: {COVERAGE_MIN: "78"}
+        env: {COVERAGE_MIN: "80"}
 
   quality-security:
     runs-on: ubuntu-latest
