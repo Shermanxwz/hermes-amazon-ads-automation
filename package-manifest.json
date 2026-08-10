@@ -1,21 +1,23 @@
 {
   "package": "hermes-amazon-ads-automation",
-  "version": "4.1.0",
+  "version": "4.2.1",
   "scope": "Amazon advertising-attributed ACOS operations only; Sponsored Products full-managed sealed autonomy",
   "runtime": {
     "control_plane": "Python 3.11+ standard library",
-    "database": "SQLite WAL with periodic checkpoint, adaptive retention and safe reclaim",
+    "database": "SQLite WAL with periodic checkpoint, adaptive retention and safe online backup",
     "hermes_contract": "hermes-agent 0.18.2-0.20.x with real tool, hook, command, skill and delegation contracts",
     "amazon_capability": "live Amazon Ads MCP atomic tools with deterministic Direct Ads API fallback",
     "official_contracts": "legacy Amazon Ads API semantic fingerprint plus Unified API GA/Beta separation",
     "regional_contract": "NA/EU/FE Profile-to-MCP tool isolation for reads, jobs and writes",
-    "web": "authenticated responsive single-page visualization and emergency control surface",
-    "owner_surface": "Hermes natural-language operation with exception-only interruption",
+    "web": "authenticated responsive visualization, emergency control and owner budget surface",
+    "owner_surface": "Hermes/Hermes Studio natural-language operation with exception-only interruption",
     "target_host": "2C2G Linux VPS"
   },
   "capabilities": [
     "delay-aware Bayesian CVR, AOV, final attributed sales and ACOS posterior estimation",
     "probability-gated bid, negative, harvest, placement, budget and lifecycle decisions",
+    "budget-bounded exploration where evidence controls risk size rather than basic permission to experiment",
+    "account-level daily ad-budget exposure hard cap with a bounded exploration pool",
     "global exposure-neutral Campaign budget reallocation",
     "bounded Marketing Stream/hourly pacing",
     "automatic Sponsored Products standing authorization without per-plan approval flags",
@@ -36,9 +38,10 @@
     "recorded post-write evidence bound to verifier session and action ID",
     "expired, partial and unknown write quarantine without blind replay",
     "permanently blocked billing, account administration, unknown, drifted, delete, archive and black-box composite operations",
-    "single-page Web with KPI, ACOS trend, AI activity, exceptions and emergency modes",
+    "single-page Web with KPI, ACOS trend, AI activity, exceptions, emergency modes and daily budget controls",
+    "scheduled orchestration through Hermes itself so the normal plugin trust boundary cannot be bypassed",
     "one-command full sandbox gate with separate PASS, FAIL and EXTERNAL evidence",
-    "browser, stress, deployment, quality, official-contract and branch-coverage CI gates"
+    "browser, stress, deployment, privacy/security, official-contract and branch-coverage CI gates"
   ],
   "production_acceptance_required": [
     "owner Amazon Ads OAuth and refresh recovery",
@@ -50,6 +53,6 @@
     "historical replay plus sustained OBSERVE shadow review",
     "Amazon Ads Test Account or controlled real-account SP Campaign graph canary with staged activation and independent readback",
     "mature attribution-window canary review",
-    "actual VPS HTTPS, reboot, storage soak and backup-restore drill"
+    "actual VPS HTTPS, Hermes Studio shared-profile integration, reboot, storage soak and backup-restore drill"
   ]
 }
