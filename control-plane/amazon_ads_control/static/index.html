@@ -58,8 +58,8 @@
             <span id="strategy-message" aria-live="polite"></span>
           </form>
           <form id="budget-form" class="strategy-form">
-            <label><span>每日总预算硬上限</span><div class="input-suffix"><input id="max-daily-ad-spend" type="number" min="1" step="1"><b id="daily-currency-label">—</b></div></label>
-            <label><span>AI 探索预算比例</span><div class="input-suffix"><input id="exploration-budget-pct" type="number" min="0" max="100" step="1"><b>%</b></div></label>
+            <label><span>每日最大花费硬上限</span><div class="input-suffix"><input id="max-daily-ad-spend" type="number" min="1" step="1"><b id="daily-currency-label">—</b></div></label>
+            <label><span>AI 探索花费比例</span><div class="input-suffix"><input id="exploration-budget-pct" type="number" min="0" max="100" step="1"><b>%</b></div></label>
             <button type="submit">保存</button>
             <span id="budget-message" aria-live="polite"></span>
           </form>
@@ -69,7 +69,7 @@
 
       <section class="panel orchestrator-panel" aria-label="后台编排器状态">
         <div class="section-title">
-          <div><h2>后台编排器</h2><p>仅运营已绑定的 US Sponsored Products Profile；所有增量资金暴露受每日硬上限约束</p></div>
+          <div><h2>后台编排器</h2><p>仅运营已绑定的 US Sponsored Products Profile；增加暴露按 Amazon 高流量日最坏花费系数计入硬上限</p></div>
           <span id="orchestrator-status" class="status-pill">—</span>
         </div>
         <div class="orchestrator-grid">
@@ -79,9 +79,9 @@
           <div><span class="muted">最近心跳</span><strong id="orchestrator-heartbeat">—</strong></div>
         </div>
         <div class="orchestrator-grid">
-          <div><span class="muted">预算暴露</span><strong id="budget-exposure">—</strong></div>
+          <div><span class="muted">最坏单日花费暴露</span><strong id="budget-exposure">—</strong></div>
           <div><span class="muted">剩余硬上限</span><strong id="budget-remaining">—</strong></div>
-          <div><span class="muted">探索池</span><strong id="exploration-remaining">—</strong></div>
+          <div><span class="muted">探索花费池</span><strong id="exploration-remaining">—</strong></div>
           <div><span class="muted">预算安全状态</span><strong id="budget-guard-state">—</strong></div>
         </div>
         <div id="orchestrator-detail" class="orchestrator-detail">等待状态更新</div>
