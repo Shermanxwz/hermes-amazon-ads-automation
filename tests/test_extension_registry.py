@@ -19,31 +19,14 @@ class ExtensionRegistryTests(unittest.TestCase):
         self.assertEqual(len(EXTENSION_ORDER), len(set(EXTENSION_ORDER)))
 
     def test_safety_sensitive_order_constraints_are_explicit(self):
-        self.assertLess(
-            EXTENSION_ORDER.index("regional_mcp"),
-            EXTENSION_ORDER.index("structural_execution"),
-        )
-        self.assertLess(
-            EXTENSION_ORDER.index("structural_hardening"),
-            EXTENSION_ORDER.index("sealed_autonomy"),
-        )
-        self.assertLess(
-            EXTENSION_ORDER.index("sealed_autonomy"),
-            EXTENSION_ORDER.index("verification_hardening"),
-        )
-        self.assertLess(
-            EXTENSION_ORDER.index("verification_hardening"),
-            EXTENSION_ORDER.index("sealed_activation"),
-        )
-        self.assertLess(
-            EXTENSION_ORDER.index("sealed_activation"),
-            EXTENSION_ORDER.index("sealed_activation_trust"),
-        )
-        self.assertLess(
-            EXTENSION_ORDER.index("sealed_activation_trust"),
-            EXTENSION_ORDER.index("sealed_activation_outcomes"),
-        )
-        self.assertEqual(EXTENSION_ORDER[-1], "sealed_activation_outcomes")
+        self.assertLess(EXTENSION_ORDER.index("regional_mcp"), EXTENSION_ORDER.index("structural_execution"))
+        self.assertLess(EXTENSION_ORDER.index("structural_hardening"), EXTENSION_ORDER.index("sealed_autonomy"))
+        self.assertLess(EXTENSION_ORDER.index("sealed_autonomy"), EXTENSION_ORDER.index("verification_hardening"))
+        self.assertLess(EXTENSION_ORDER.index("verification_hardening"), EXTENSION_ORDER.index("sealed_activation"))
+        self.assertLess(EXTENSION_ORDER.index("sealed_activation"), EXTENSION_ORDER.index("sealed_activation_trust"))
+        self.assertLess(EXTENSION_ORDER.index("sealed_activation_trust"), EXTENSION_ORDER.index("sealed_activation_outcomes"))
+        self.assertLess(EXTENSION_ORDER.index("sealed_activation_outcomes"), EXTENSION_ORDER.index("budget_guard"))
+        self.assertEqual(EXTENSION_ORDER[-1], "budget_guard")
 
     def test_http_version_matches_package_generation(self):
         major, minor, *_ = __version__.split(".")
@@ -58,7 +41,7 @@ class ExtensionRegistryTests(unittest.TestCase):
         self.assertEqual(__version__, manifest_version)
         current_state = (ROOT / "docs" / "current-state.md").read_text(encoding="utf-8")
         self.assertIn(f"Package release {manifest_version}", current_state)
-        self.assertIn("sealed-operation/control-policy generation v6", current_state)
+        self.assertIn("sealed-operation/control-policy generation v6.1", current_state)
 
 
 if __name__ == "__main__":
