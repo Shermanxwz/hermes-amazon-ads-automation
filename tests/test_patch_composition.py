@@ -14,9 +14,12 @@ class PatchCompositionTests(unittest.TestCase):
             ControlService.sync_catalog.__module__,
             "amazon_ads_control.catalog_region_hardening",
         )
+        # The budget guard is intentionally the outermost write guard. It first
+        # delegates to the previously sealed autonomy guard and can only narrow
+        # permission further when financial exposure would increase.
         self.assertEqual(
             ControlService._guardrail_check.__module__,
-            "amazon_ads_control.sealed_autonomy",
+            "amazon_ads_control.budget_guard",
         )
         self.assertEqual(
             ControlService.verify_decision.__module__,
