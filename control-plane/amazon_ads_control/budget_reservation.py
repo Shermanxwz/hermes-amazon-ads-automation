@@ -92,12 +92,19 @@ def _fresh_complete_live_exposure(conn, profile_id: str, max_age_seconds: int) -
         if not complete:
             continue
         return {
+            "source": "fresh_complete_amazon_campaign_read",
             "action_id": int(row["id"]),
             "observed_at": str(row["created_at"]),
             "exposure": round(sum(budgets.values()), 2),
             "campaign_count": len(budgets),
+            "fresh": True,
         }
     return None
+
+
+def _fresh_complete_for_store(store, profile_id: str, max_age_seconds: int) -> dict[str, Any] | None:
+    with store.connection() as conn:
+        return _fresh_complete_live_exposure(conn, profile_id, max_age_seconds)
 
 
 def _committed_inside_transaction(store, conn, profile_id: str, observed_at: str, current_id: str) -> tuple[float, float]:
@@ -229,9 +236,9 @@ def _install_store() -> None:
                 if duplicate:
                     raise ValueError(f"equivalent decision is inside cooldown ({duplicate['status']})")
 
-                # This is the authoritative financial gate. SQLite's IMMEDIATE
-                # transaction serializes concurrent reservations, so a second
-                # writer observes the first reservation before computing room.
+                # Authoritative financial gate. BEGIN IMMEDIATE serializes
+                # concurrent reservations, so the second writer observes the
+                # first writer's reserved exposure before computing room.
                 _enforce_atomic_budget(self, conn, row)
 
                 updated = conn.execute(
@@ -252,9 +259,18 @@ def _install_store() -> None:
     Store.reserve_decision = reserve_decision
 
 
+def _install_budget_observation() -> None:
+    # budget_status() and the fast service guard must use the same strict
+    # completeness/pagination rule as the authoritative transaction gate.
+    from . import budget_guard
+
+    budget_guard._fresh_live_exposure = _fresh_complete_for_store
+
+
 def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
     _install_store()
+    _install_budget_observation()
     _INSTALLED = True
