@@ -41,7 +41,19 @@ class PluginV3Tests(unittest.TestCase):
         for item in calls[0][2]["tools"]:
             self.assertTrue(item["registered_name"].startswith("mcp_amazon_ads_")); self.assertNotIn("risk",item); self.assertNotIn("semantic",item)
 
-    def test_pre_and_post_preserve_authorization_and_event(self):
+    def test_sync_falls_back_to_live_registry_map_when_toolset_index_is_empty(self):
+        class MapOnlyRegistry:
+            def get_registered_toolset_names(self): return ["mcp-amazon-ads"]
+            def get_tool_names_for_toolset(self, name): return []
+            def get_tool_to_toolset_map(self):
+                return {"mcp_amazon_ads_campaign_management_query_campaign": "mcp-amazon-ads"}
+            def get_schema(self, name): return {"description": "Query", "parameters": {"type": "object"}}
+        sys.modules["tools.registry"].registry = MapOnlyRegistry()
+        with patch.object(self.plugin.client,"request",return_value={"tool_count":1}) as request:
+            result=self.plugin.sync_live_catalog(force=True)
+        self.assertEqual(result["tool_count"],1)
+        self.assertEqual(request.call_args.args[1],"/api/agent/catalog-sync")
+
         responses=[]
         def request(method,path,payload=None,timeout=4):
             if path=="/api/agent/catalog-sync": return {"tool_count":2}
