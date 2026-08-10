@@ -16,8 +16,6 @@ const runtime_status = null;
   async function updateRuntimeMode(mode) {
     let settings;
     if (mode === "autopilot") {
-      // Two-phase fail-closed transition: requesting autopilot never enables
-      // writes in the same state mutation. A failure leaves execution disabled.
       settings = await api("/api/settings", {
         method: "PUT",
         body: JSON.stringify({mode: "autopilot", execution_enabled: false}),
@@ -62,6 +60,7 @@ const runtime_status = null;
     const settings = dashboard.settings || {};
     const budget = dashboard.budget_guard || {};
     const currency = dashboard.profiles?.[0]?.currency || "账户货币";
+    const multiplier = Number(budget.amazon_overdelivery_multiplier || 2);
     const daily = document.querySelector("#max-daily-ad-spend");
     const explore = document.querySelector("#exploration-budget-pct");
     if (daily) daily.value = settings.max_daily_ad_spend ?? 100;
@@ -73,14 +72,17 @@ const runtime_status = null;
     const remaining = document.querySelector("#budget-remaining");
     const exploration = document.querySelector("#exploration-remaining");
     const state = document.querySelector("#budget-guard-state");
-    if (exposure) exposure.textContent = `${number(budget.projected_exposure, 2)} / ${number(budget.hard_cap, 2)} ${currency}`;
+    if (exposure) {
+      exposure.textContent = `${number(budget.projected_exposure, 2)} / ${number(budget.hard_cap, 2)} ${currency}`;
+      exposure.title = `按 Amazon 高流量日最坏 ${number(multiplier, 2)}× 日预算花费系数计算`;
+    }
     if (remaining) remaining.textContent = `${number(budget.remaining, 2)} ${currency}`;
     if (exploration) exploration.textContent = `${number(budget.exploration_remaining, 2)} / ${number(budget.exploration_cap, 2)} ${currency}`;
     if (state) {
       const safe = budget.fresh && Number(budget.projected_exposure || 0) < Number(budget.hard_cap || 0);
       state.textContent = budget.fresh ? (budget.exploration_allowed ? "可探索" : budget.increase_allowed ? "保守运行" : "仅降风险") : "等待实时预算读取";
       state.className = safe ? "good" : "warn";
-      state.title = budget.reason || "";
+      state.title = `${budget.reason || ""} · Amazon 最坏花费系数 ${number(multiplier, 2)}×`;
     }
   };
 
@@ -92,15 +94,15 @@ const runtime_status = null;
       mutate(button, async () => {
         const cap = Number(document.querySelector("#max-daily-ad-spend").value);
         const pct = Number(document.querySelector("#exploration-budget-pct").value);
-        if (!Number.isFinite(cap) || cap < 1) throw new Error("每日总预算必须大于 0");
-        if (!Number.isFinite(pct) || pct < 0 || pct > 100) throw new Error("探索预算比例必须在 0% 到 100% 之间");
+        if (!Number.isFinite(cap) || cap < 1) throw new Error("每日最大花费必须大于 0");
+        if (!Number.isFinite(pct) || pct < 0 || pct > 100) throw new Error("探索花费比例必须在 0% 到 100% 之间");
         await api("/api/settings", {
           method: "PUT",
           body: JSON.stringify({max_daily_ad_spend: cap, exploration_budget_pct: pct}),
         });
         document.querySelector("#budget-message").textContent = "已保存";
         await refresh();
-      }, "每日预算硬上限已更新").catch(() => {});
+      }, "每日最大花费硬上限已更新").catch(() => {});
     });
   }
 })();
