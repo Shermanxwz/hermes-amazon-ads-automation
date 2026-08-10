@@ -10,6 +10,12 @@ from amazon_ads_control.db import Store
 from amazon_ads_control.service import ControlService
 
 UTC = timezone.utc
+READ_CAMPAIGN = {
+    "registered_name": "mcp_amazon_ads_campaign_management_query_campaign",
+    "native_name": "campaign_management-query_campaign",
+    "source": "hermes-registry:na",
+    "schema": {"description": "Query campaigns", "parameters": {"type": "object", "properties": {}}},
+}
 CREATE_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_create_campaign",
     "native_name": "campaign_management-create_campaign",
@@ -42,11 +48,24 @@ class ApprovalStateMachineTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.store = Store(Path(self.temp.name) / "state.db")
         self.service = ControlService(self.store)
-        self.store.sync_catalog([descriptor_from_payload(CREATE_CAMPAIGN)])
+        self.store.sync_catalog([
+            descriptor_from_payload(READ_CAMPAIGN),
+            descriptor_from_payload(CREATE_CAMPAIGN),
+        ])
         self.store.update_settings({"mode": "autopilot", "execution_enabled": True})
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def fresh_budget_read(self):
+        return self.store.record_action(
+            task_id=None, session_id="main-budget-read", actor_role="main", phase="after",
+            tool_name=READ_CAMPAIGN["registered_name"], operation="read", allowed=True,
+            args={"body": {"accessRequestedAccount": {"profileId": "p1"}}},
+            success=True, outcome_status="COMPLETED", structured_result=True,
+            reason="fresh full account campaign budget observation", result_summary="empty account",
+            result={"campaigns": []}, duration_ms=1,
+        )
 
     def plan(self):
         return self.service.create_managed_plan({
@@ -85,6 +104,7 @@ class ApprovalStateMachineTests(unittest.TestCase):
             "goal": f"[ads-task:{task_id}] [ads-role:executor] execute",
             "model": "MiniMax-M3",
         })
+        self.fresh_budget_read()
         authorization = self.service.authorize_tool({
             "tool_name": CREATE_CAMPAIGN["registered_name"],
             "args": {"campaigns": [{"name": "State Campaign", "budget": 12}]},
