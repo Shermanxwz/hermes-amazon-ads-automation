@@ -35,7 +35,9 @@ def install_extensions() -> tuple[str, ...]:
             installer()
             installed.append(name)
         from .api import Handler
-        Handler.server_version = "HermesAdsControl/4.2.1"
+        # The HTTP server string tracks protocol generation (major.minor),
+        # while package/plugin/release metadata carries the full patch version.
+        Handler.server_version = "HermesAdsControl/4.2"
         _INSTALLED = tuple(installed)
         return _INSTALLED
 
