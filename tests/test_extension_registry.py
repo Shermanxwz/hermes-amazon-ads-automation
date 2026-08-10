@@ -26,7 +26,8 @@ class ExtensionRegistryTests(unittest.TestCase):
         self.assertLess(EXTENSION_ORDER.index("sealed_activation"), EXTENSION_ORDER.index("sealed_activation_trust"))
         self.assertLess(EXTENSION_ORDER.index("sealed_activation_trust"), EXTENSION_ORDER.index("sealed_activation_outcomes"))
         self.assertLess(EXTENSION_ORDER.index("sealed_activation_outcomes"), EXTENSION_ORDER.index("budget_guard"))
-        self.assertEqual(EXTENSION_ORDER[-1], "budget_guard")
+        self.assertLess(EXTENSION_ORDER.index("budget_guard"), EXTENSION_ORDER.index("budget_reservation"))
+        self.assertEqual(EXTENSION_ORDER[-1], "budget_reservation")
 
     def test_http_version_matches_package_generation(self):
         major, minor, *_ = __version__.split(".")
