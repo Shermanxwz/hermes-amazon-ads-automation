@@ -10,19 +10,15 @@ exec 8>"$LOCK"
 flock -n 8 || exit 0
 
 /usr/bin/python3 - "$ENV_FILE" "$BACKUP_DIR" <<'PY'
-import hashlib
 import json
 import os
-import shutil
 import sys
 import tempfile
-import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
 env_path = Path(sys.argv[1])
-backup_dir = Path(sys.argv[2])
 lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
 values = {}
 for line in lines:
@@ -52,27 +48,13 @@ access = str(payload.get("access_token") or "").strip()
 if not access:
     raise SystemExit("Amazon OAuth refresh returned no access_token")
 
-updated = []
-replaced = False
-for line in lines:
-    if line.startswith("AMAZON_ADS_MCP_ACCESS_TOKEN="):
-        updated.append("AMAZON_ADS_MCP_ACCESS_TOKEN=" + access + "\n")
-        replaced = True
-    else:
-        updated.append(line)
-if not replaced:
-    updated.append("AMAZON_ADS_MCP_ACCESS_TOKEN=" + access + "\n")
-
-backup_dir.mkdir(parents=True, exist_ok=True)
 runtime_path = Path("/var/lib/hermes-amazon-ads-control/runtime.env")
+runtime_path.parent.mkdir(parents=True, exist_ok=True)
 fd, temporary = tempfile.mkstemp(prefix=".runtime.env.", dir=str(runtime_path.parent))
 os.close(fd)
 os.chmod(temporary, 0o600)
 Path(temporary).write_text("AMAZON_ADS_MCP_ACCESS_TOKEN=" + access + "\n", encoding="utf-8")
 os.replace(temporary, runtime_path)
 os.chmod(runtime_path, 0o600)
-
-stamp = time.strftime("%Y%m%dT%H%M%S%z")
-backup = backup_dir / (env_path.name + ".pre-refresh-" + stamp)
-print("amazon_token_refresh=ok", "access_len=" + str(len(access)), "access_sha256_prefix=" + hashlib.sha256(access.encode()).hexdigest()[:16], "runtime_file=" + str(runtime_path), "credentials_backup_not_needed=true")
+print("amazon_token_refresh=ok runtime_credentials_updated=true")
 PY
