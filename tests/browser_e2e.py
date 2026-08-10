@@ -168,10 +168,6 @@ def main() -> int:
                 def capture_console(message) -> None:
                     if message.type != "error":
                         return
-                    # /health/ready intentionally returns 503 whenever the
-                    # controller is fail-closed (observe, paused, or phase one
-                    # of the two-step autopilot transition). UI state and the
-                    # readiness payload are asserted separately below.
                     if "503 (Service Unavailable)" not in message.text:
                         console_errors.append(message.text)
 
@@ -192,13 +188,25 @@ def main() -> int:
                 assert page.locator("#trend-chart svg").is_visible()
                 assert page.locator("#activity-list").is_visible()
                 assert page.get_by_text("审批", exact=True).count() == 0
+
                 page.locator("#target-acos").fill("27")
                 page.locator("#max-campaign-budget").fill("45")
-                page.get_by_role("button", name="保存", exact=True).click()
+                page.locator("#strategy-form").get_by_role("button", name="保存", exact=True).click()
                 page.locator("#notice").filter(has_text="运营目标已更新").wait_for()
                 current = store.get_settings()
                 assert current["target_acos"] == 27
                 assert current["sealed_sp_max_campaign_budget"] == 45
+
+                page.locator("#max-daily-ad-spend").fill("300")
+                page.locator("#exploration-budget-pct").fill("20")
+                page.locator("#budget-form").get_by_role("button", name="保存", exact=True).click()
+                page.locator("#notice").filter(has_text="每日预算硬上限已更新").wait_for()
+                current = store.get_settings()
+                assert current["max_daily_ad_spend"] == 300
+                assert current["exploration_budget_pct"] == 20
+                assert "300" in page.locator("#budget-exposure").inner_text()
+                assert page.locator("#budget-guard-state").is_visible()
+
                 page.get_by_role("button", name="全托管运行").click()
                 page.locator("#mode-pill").filter(has_text="AUTOPILOT").wait_for()
                 page.locator("#readiness-pill").filter(has_text="WRITABLE").wait_for()
@@ -209,6 +217,7 @@ def main() -> int:
                 assert page.locator(".topbar").bounding_box()["width"] <= 390
                 assert page.locator(".mode-buttons").is_visible()
                 assert page.locator("#kpis").is_visible()
+                assert page.locator("#budget-form").is_visible()
                 page.reload(wait_until="networkidle")
                 page.locator("#app").wait_for(state="visible")
                 page.get_by_role("button", name="退出").click()
