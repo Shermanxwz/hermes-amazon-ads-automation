@@ -19,6 +19,7 @@ from .db import UTC, future_iso, now_iso
 _INSTALLED = False
 _PENDING = {"reserved", "pending", "uncertain"}
 _COUNTABLE = _PENDING | {"executed", "verified"}
+_OPEN_ACTIVATION = {"blocked", "planned", "reserved", "executed", "pending", "uncertain"}
 OVERDELIVERY_SETTING = "amazon_daily_budget_max_spend_multiplier"
 
 
@@ -47,6 +48,16 @@ def _has_more_pages(result: Any) -> bool:
     return False
 
 
+def _campaign_state(campaign: dict[str, Any]) -> str | None:
+    direct = campaign.get("state")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip().upper()
+    for value in _values(campaign, "state"):
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return None
+
+
 def _fresh_complete_live_exposure(conn, profile_id: str, max_age_seconds: int) -> dict[str, Any] | None:
     cutoff = datetime.now(UTC).timestamp() - max_age_seconds
     rows = conn.execute(
@@ -72,6 +83,7 @@ def _fresh_complete_live_exposure(conn, profile_id: str, max_age_seconds: int) -
         if campaigns is None:
             continue
         budgets: dict[str, float] = {}
+        states: dict[str, str] = {}
         complete = True
         for campaign in campaigns:
             campaign_id = str(
@@ -88,21 +100,31 @@ def _fresh_complete_live_exposure(conn, profile_id: str, max_age_seconds: int) -
                 )
             ).strip()
             budget = _campaign_budget(campaign)
-            if not campaign_id or budget is None:
+            state = _campaign_state(campaign)
+            if not campaign_id or budget is None or not state:
                 complete = False
                 break
             budgets[campaign_id] = max(0.0, float(budget))
+            states[campaign_id] = state
         if not complete:
             continue
-        base_budget = round(sum(budgets.values()), 2)
+        # ENABLED campaigns are current spend exposure. Unknown non-paused
+        # states are conservatively treated as active. PAUSED/ARCHIVED budgets
+        # do not block autonomy until a controller decision reserves activation.
+        active_budget = round(sum(
+            budget for campaign_id, budget in budgets.items()
+            if states.get(campaign_id) not in {"PAUSED", "ARCHIVED"}
+        ), 2)
         return {
             "source": "fresh_complete_amazon_campaign_read",
             "action_id": int(row["id"]),
             "observed_at": str(row["created_at"]),
-            "campaign_budget_sum": base_budget,
-            "exposure": base_budget,
+            "campaign_budget_sum": active_budget,
+            "all_campaign_budget_sum": round(sum(budgets.values()), 2),
             "campaign_count": len(budgets),
             "fresh": True,
+            "_campaign_budgets": budgets,
+            "_campaign_states": states,
         }
     return None
 
@@ -112,9 +134,90 @@ def _fresh_complete_for_store(store, profile_id: str, max_age_seconds: int) -> d
         return _fresh_complete_live_exposure(conn, profile_id, max_age_seconds)
 
 
-def _committed_inside_transaction(store, conn, profile_id: str, observed_at: str, current_id: str) -> tuple[float, float]:
+def _source_campaign_id(conn, decision: dict[str, Any]) -> str:
+    payload = decision.get("payload") if isinstance(decision.get("payload"), dict) else {}
+    source_key = str(payload.get("activation_source_plan_key") or "").strip()
+    if source_key and decision.get("task_id"):
+        row = conn.execute(
+            "SELECT entity_id FROM decisions WHERE task_id=? AND plan_key=? LIMIT 1",
+            (decision["task_id"], source_key),
+        ).fetchone()
+        if row and row["entity_id"]:
+            return str(row["entity_id"])
+    entity_id = str(decision.get("entity_id") or "").strip()
+    return "" if entity_id.startswith("{{decision:") else entity_id
+
+
+def _enable_delta(conn, decision: dict[str, Any], observation: dict[str, Any]) -> float:
+    action = str(decision.get("action_type") or "").lower()
+    if action not in {"enable", "resume", "update_state", "set_state"}:
+        return 0.0
+    if str(decision.get("expected_family") or "") != "campaign":
+        return 0.0
+    payload = decision.get("payload") if isinstance(decision.get("payload"), dict) else {}
+    args = payload.get("approved_args") if isinstance(payload.get("approved_args"), dict) else payload
+    requested = [str(value).upper() for value in _values(args, "state", "status") if value is not None]
+    if requested and "ENABLED" not in requested:
+        return 0.0
+    campaign_id = _source_campaign_id(conn, decision)
+    budgets = observation.get("_campaign_budgets") if isinstance(observation.get("_campaign_budgets"), dict) else {}
+    try:
+        return max(0.0, float(budgets.get(campaign_id, 0.0)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _effective_delta(conn, decision: dict[str, Any], observation: dict[str, Any]) -> float:
+    direct = _positive_budget_delta(decision)
+    if direct > 0:
+        return direct
+    return _enable_delta(conn, decision, observation)
+
+
+def _create_has_open_activation(conn, decision: dict[str, Any]) -> bool:
+    if str(decision.get("action_type") or "") != "create_campaign" or not decision.get("task_id"):
+        return False
+    rows = conn.execute(
+        "SELECT payload_json,status FROM decisions WHERE task_id=? AND action_type='enable'",
+        (decision["task_id"],),
+    ).fetchall()
+    source_key = str(decision.get("plan_key") or "")
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if str(payload.get("activation_source_plan_key") or "") == source_key and str(row["status"] or "") in _OPEN_ACTIVATION:
+            return True
+    return False
+
+
+def _absorbed_by_observation(conn, decision: dict[str, Any], observation: dict[str, Any]) -> bool:
+    observed = _time(observation.get("observed_at"))
+    executed = _time(decision.get("executed_at"))
+    if not observed or not executed or executed > observed:
+        return False
+    action = str(decision.get("action_type") or "").lower()
+    campaign_id = _source_campaign_id(conn, decision)
+    states = observation.get("_campaign_states") if isinstance(observation.get("_campaign_states"), dict) else {}
+    if action in {"enable", "resume", "update_state", "set_state"}:
+        return states.get(campaign_id) == "ENABLED"
+    if action == "create_campaign":
+        state = states.get(campaign_id)
+        if state == "ENABLED":
+            return True
+        if state == "PAUSED" and _create_has_open_activation(conn, decision):
+            return False
+        return state is not None
+    # Budget mutations observed after execution are reflected in the complete
+    # Campaign budget snapshot regardless of current active/paused state.
+    return True
+
+
+def _committed_inside_transaction(
+    store, conn, profile_id: str, observation: dict[str, Any], current_id: str,
+) -> tuple[float, float]:
     day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat(timespec="seconds")
-    observed = _time(observed_at)
     rows = conn.execute(
         "SELECT * FROM decisions WHERE profile_id=? AND id<>? AND created_at>=? "
         "AND status IN ('reserved','pending','uncertain','executed','verified') ORDER BY created_at,id",
@@ -127,11 +230,10 @@ def _committed_inside_transaction(store, conn, profile_id: str, observed_at: str
         status = str(item.get("status") or "")
         if status not in _COUNTABLE:
             continue
-        delta = _positive_budget_delta(item)
+        delta = _effective_delta(conn, item, observation)
         if delta <= 0:
             continue
-        executed = _time(item.get("executed_at"))
-        if status not in _PENDING and observed and executed and executed <= observed:
+        if status not in _PENDING and _absorbed_by_observation(conn, item, observation):
             continue
         committed += delta
         if _exploration(item):
@@ -139,9 +241,16 @@ def _committed_inside_transaction(store, conn, profile_id: str, observed_at: str
     return round(committed, 2), round(exploration, 2)
 
 
-def _raw_committed(store, profile_id: str, observed_at: str | None) -> tuple[float, float]:
+def _raw_committed(store, profile_id: str, observation: dict[str, Any]) -> tuple[float, float]:
     with store.connection() as conn:
-        return _committed_inside_transaction(store, conn, profile_id, observed_at or "", "")
+        return _committed_inside_transaction(store, conn, profile_id, observation, "")
+
+
+def _sanitize_observation(observation: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        key: value for key, value in (observation or {}).items()
+        if not str(key).startswith("_")
+    }
 
 
 def _owner_budget_status(store, profile_id: str | None = None, *, require_fresh: bool = False) -> dict[str, Any]:
@@ -168,11 +277,9 @@ def _owner_budget_status(store, profile_id: str | None = None, *, require_fresh:
 
     live = _fresh_complete_for_store(store, profile_id, max_age)
     fallback = budget_guard._snapshot_exposure(store, profile_id)
-    observation = live or fallback
-    raw_base = float((observation or {}).get("campaign_budget_sum", (observation or {}).get("exposure", 0.0)) or 0.0)
-    committed, exploration_committed = _raw_committed(
-        store, profile_id, (observation or {}).get("observed_at")
-    )
+    observation = live or fallback or {}
+    raw_base = float(observation.get("campaign_budget_sum", observation.get("exposure", 0.0)) or 0.0)
+    committed, exploration_committed = _raw_committed(store, profile_id, observation)
     observed_exposure = round(raw_base * multiplier, 2)
     committed_exposure = round(committed * multiplier, 2)
     projected = round(observed_exposure + committed_exposure, 2)
@@ -199,14 +306,14 @@ def _owner_budget_status(store, profile_id: str | None = None, *, require_fresh:
         "exploration_stop_pct": stop_pct,
         "conservative_pct": conservative_pct,
         "fresh": bool(live),
-        "observation_available": observation is not None,
-        "observation": dict(observation or {}),
+        "observation_available": bool(observation),
+        "observation": _sanitize_observation(observation),
         "increase_allowed": bool(live) and projected < cap and ratio < conservative_pct,
         "exploration_allowed": bool(live) and projected < cap and ratio < stop_pct and exploration_committed_exposure < exploration_cap,
     }
     if require_fresh and not live:
         result["reason"] = "a fresh complete unpaginated Amazon Campaign budget read is required before increasing exposure"
-    elif observation is None:
+    elif not observation:
         result["reason"] = "no Campaign budget observation is available"
     elif projected >= cap:
         result["reason"] = "daily maximum-spend exposure hard cap reached"
@@ -221,12 +328,14 @@ def _owner_budget_status(store, profile_id: str | None = None, *, require_fresh:
 
 def _enforce_atomic_budget(store, conn, row) -> None:
     decision = store._decision_dict(row)
-    delta = _positive_budget_delta(decision)
-    if delta <= 0:
-        return
     settings = _settings(conn)
     if settings.get("daily_budget_hard_cap_enabled") is not True:
-        raise ValueError("daily budget exposure hard cap is unavailable or disabled")
+        # Risk-reducing and exposure-neutral writes do not need this setting;
+        # identify possible positive exposure only after we have an observation.
+        raw_direct = _positive_budget_delta(decision)
+        if raw_direct > 0 or str(decision.get("action_type") or "").lower() in {"enable", "resume"}:
+            raise ValueError("daily budget exposure hard cap is unavailable or disabled")
+        return
     required = {
         "max_daily_ad_spend",
         "exploration_budget_pct",
@@ -236,7 +345,9 @@ def _enforce_atomic_budget(store, conn, row) -> None:
         OVERDELIVERY_SETTING,
     }
     if not required.issubset(settings):
-        raise ValueError("daily budget exposure settings are incomplete")
+        if _positive_budget_delta(decision) > 0:
+            raise ValueError("daily budget exposure settings are incomplete")
+        return
     cap = float(settings["max_daily_ad_spend"])
     exploration_pct = float(settings["exploration_budget_pct"])
     stop_pct = float(settings["budget_guard_exploration_stop_pct"])
@@ -248,13 +359,22 @@ def _enforce_atomic_budget(store, conn, row) -> None:
 
     profile_id = str(decision.get("profile_id") or "").strip()
     if not profile_id:
-        raise ValueError("daily budget reservation requires a bound Profile")
+        if _positive_budget_delta(decision) > 0:
+            raise ValueError("daily budget reservation requires a bound Profile")
+        return
     observation = _fresh_complete_live_exposure(conn, profile_id, max_age)
+    direct = _positive_budget_delta(decision)
+    maybe_enable = str(decision.get("action_type") or "").lower() in {"enable", "resume", "update_state", "set_state"}
     if not observation:
-        raise ValueError("a fresh complete unpaginated Amazon Campaign budget read is required before increasing exposure")
+        if direct > 0 or maybe_enable:
+            raise ValueError("a fresh complete unpaginated Amazon Campaign budget read is required before increasing exposure")
+        return
+    delta = _effective_delta(conn, decision, observation)
+    if delta <= 0:
+        return
 
     committed, exploration_committed = _committed_inside_transaction(
-        store, conn, profile_id, observation["observed_at"], str(decision["id"])
+        store, conn, profile_id, observation, str(decision["id"])
     )
     projected_after = (float(observation["campaign_budget_sum"]) + committed + delta) * multiplier
     if projected_after > cap + 1e-9:
