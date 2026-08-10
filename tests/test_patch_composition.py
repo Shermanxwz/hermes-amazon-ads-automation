@@ -14,9 +14,9 @@ class PatchCompositionTests(unittest.TestCase):
             ControlService.sync_catalog.__module__,
             "amazon_ads_control.catalog_region_hardening",
         )
-        # The budget guard is intentionally the outermost write guard. It first
-        # delegates to the previously sealed autonomy guard and can only narrow
-        # permission further when financial exposure would increase.
+        # The budget guard is intentionally the outermost service write guard.
+        # It first delegates to the previously sealed autonomy guard and can
+        # only narrow permission further when financial exposure would increase.
         self.assertEqual(
             ControlService._guardrail_check.__module__,
             "amazon_ads_control.budget_guard",
@@ -26,10 +26,16 @@ class PatchCompositionTests(unittest.TestCase):
             "amazon_ads_control.verification_hardening",
         )
 
-    def test_store_catalog_drift_owner_is_regional_layer(self):
+    def test_store_safety_owners(self):
         self.assertEqual(
             Store.sync_catalog.__module__,
             "amazon_ads_control.regional_mcp",
+        )
+        # The authoritative budget check and decision reservation share one
+        # BEGIN IMMEDIATE transaction to prevent concurrent oversubscription.
+        self.assertEqual(
+            Store.reserve_decision.__module__,
+            "amazon_ads_control.budget_reservation",
         )
 
 
