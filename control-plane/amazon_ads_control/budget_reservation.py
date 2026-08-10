@@ -173,8 +173,9 @@ def _owner_budget_status(store, profile_id: str | None = None, *, require_fresh:
     committed, exploration_committed = _raw_committed(
         store, profile_id, (observation or {}).get("observed_at")
     )
-    raw_projected = raw_base + committed
-    projected = round(raw_projected * multiplier, 2)
+    observed_exposure = round(raw_base * multiplier, 2)
+    committed_exposure = round(committed * multiplier, 2)
+    projected = round(observed_exposure + committed_exposure, 2)
     exploration_committed_exposure = round(exploration_committed * multiplier, 2)
     ratio = projected / cap * 100.0 if cap > 0 else 100.0
     exploration_cap = round(cap * exploration_pct / 100.0, 2)
@@ -185,7 +186,9 @@ def _owner_budget_status(store, profile_id: str | None = None, *, require_fresh:
         "hard_cap": round(cap, 2),
         "amazon_overdelivery_multiplier": multiplier,
         "observed_campaign_budget_sum": round(raw_base, 2),
+        "observed_exposure": observed_exposure,
         "committed_campaign_budget_delta_today": round(committed, 2),
+        "committed_positive_delta_today": committed_exposure,
         "projected_exposure": projected,
         "remaining": round(max(0.0, cap - projected), 2),
         "utilization_pct": round(ratio, 2),
