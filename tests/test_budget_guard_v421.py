@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import threading
 import unittest
 
 from amazon_ads_control import budget_guard
@@ -28,7 +29,7 @@ class BudgetGuardV421Tests(unittest.TestCase):
     def tearDown(self):
         self.env.close()
 
-    def live_read(self, *budgets: float, created_at: str | None = None) -> int:
+    def live_read(self, *budgets: float, created_at: str | None = None, next_token: str | None = None) -> int:
         campaigns = []
         for index, amount in enumerate(budgets, 1):
             campaigns.append({
@@ -36,13 +37,16 @@ class BudgetGuardV421Tests(unittest.TestCase):
                 "state": "ENABLED",
                 "budgets": [{"budgetValue": {"monetaryBudgetValue": {"monetaryBudget": {"value": amount}}}}],
             })
+        result = {"campaigns": campaigns}
+        if next_token:
+            result["nextToken"] = next_token
         action_id = self.env.store.record_action(
             task_id=None, session_id="main-read", actor_role="main", phase="after",
             tool_name=READ_CAMPAIGN["registered_name"], operation="read", allowed=True,
             args={"body": {"accessRequestedAccount": {"profileId": "p1"}}},
             success=True, outcome_status="COMPLETED", structured_result=True,
             reason="fresh account budget observation", result_summary="campaign read",
-            result={"campaigns": campaigns}, duration_ms=1,
+            result=result, duration_ms=1,
         )
         if created_at:
             with self.env.store.connection() as conn:
@@ -69,6 +73,12 @@ class BudgetGuardV421Tests(unittest.TestCase):
         )
         return self.env.store.list_decisions(cycle_id=cycle["id"])[0]
 
+    def attach_task(self, decision: dict) -> tuple[dict, dict]:
+        task = self.env.service.create_task({"cycle_id": decision["cycle_id"]}, "test-main")
+        current = self.env.store.get_decision(decision["id"])
+        assert current is not None
+        return task, current
+
     def reserve_directly(self, decision_id: str) -> None:
         now = datetime.now(UTC).isoformat(timespec="seconds")
         with self.env.store.connection() as conn:
@@ -86,6 +96,13 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.assertAlmostEqual(state["remaining"], 44.5)
         self.assertTrue(state["increase_allowed"])
         self.assertTrue(state["exploration_allowed"])
+
+    def test_paginated_campaign_read_is_not_accepted_as_full_budget_observation(self):
+        self.live_read(30, next_token="more")
+        state = budget_guard.budget_status(self.env.store, "p1", require_fresh=True)
+        self.assertFalse(state["fresh"])
+        self.assertFalse(state["increase_allowed"])
+        self.assertIn("fresh structured Amazon Campaign read", state["reason"])
 
     def test_eighty_percent_stops_new_exploration(self):
         self.live_read(81)
@@ -142,6 +159,64 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.assertEqual(after["observed_exposure"], 50)
         self.assertEqual(after["committed_positive_delta_today"], 0)
         self.assertEqual(after["projected_exposure"], 50)
+
+    def test_concurrent_reservations_cannot_oversubscribe_hard_cap(self):
+        self.env.store.update_settings({
+            "budget_guard_conservative_pct": 100.0,
+            "max_daily_ad_spend": 100.0,
+        })
+        self.live_read(60)
+        task1, first = self.attach_task(self.add_campaign_decision(25))
+        task2, second = self.attach_task(self.add_campaign_decision(26))
+        barrier = threading.Barrier(3)
+        outcomes: list[tuple[str, str]] = []
+        lock = threading.Lock()
+
+        def reserve(task: dict, decision: dict, session: str) -> None:
+            barrier.wait()
+            try:
+                self.env.store.reserve_decision(
+                    decision["id"], task["id"], session, 900,
+                    cooldown_seconds=0, max_actions_per_task=50,
+                    max_actions_per_day=250, max_campaign_creates_per_day=2,
+                )
+                outcome = ("ok", decision["id"])
+            except ValueError as exc:
+                outcome = ("blocked", str(exc))
+            with lock:
+                outcomes.append(outcome)
+
+        threads = [
+            threading.Thread(target=reserve, args=(task1, first, "exec-1")),
+            threading.Thread(target=reserve, args=(task2, second, "exec-2")),
+        ]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(sum(kind == "ok" for kind, _ in outcomes), 1, outcomes)
+        blocked = [detail for kind, detail in outcomes if kind == "blocked"]
+        self.assertEqual(len(blocked), 1, outcomes)
+        self.assertIn("hard cap", blocked[0])
+        statuses = [
+            self.env.store.get_decision(first["id"])["status"],
+            self.env.store.get_decision(second["id"])["status"],
+        ]
+        self.assertEqual(statuses.count("reserved"), 1, statuses)
+        self.assertEqual(statuses.count("planned"), 1, statuses)
+
+    def test_atomic_reservation_rejects_paginated_observation(self):
+        self.env.store.update_settings({"budget_guard_conservative_pct": 100.0})
+        self.live_read(20, next_token="page-2")
+        task, decision = self.attach_task(self.add_campaign_decision(5))
+        with self.assertRaisesRegex(ValueError, "complete unpaginated"):
+            self.env.store.reserve_decision(
+                decision["id"], task["id"], "exec", 900,
+                cooldown_seconds=0, max_actions_per_task=50,
+                max_actions_per_day=250, max_campaign_creates_per_day=2,
+            )
 
     def test_daily_budget_hard_cap_setting_cannot_be_disabled(self):
         with self.assertRaisesRegex(ValueError, "locked safety invariant"):
