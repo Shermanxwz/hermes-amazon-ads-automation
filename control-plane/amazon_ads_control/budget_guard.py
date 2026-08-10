@@ -8,7 +8,8 @@ from typing import Any
 _INSTALLED = False
 UTC = timezone.utc
 _EXPLORE_NAME = re.compile(r"^HERMES-SP-EXP-", re.I)
-_ACTIVE_DECISION_STATES = {"planned", "reserved", "executed", "pending", "uncertain", "verified"}
+_PENDING_STATES = {"planned", "reserved", "pending", "uncertain"}
+_COUNTABLE_STATES = _PENDING_STATES | {"executed", "verified"}
 
 
 def _walk(value: Any):
@@ -51,6 +52,16 @@ def _number(value: Any, *names: str) -> float | None:
         if result >= 0:
             return result
     return None
+
+
+def _time(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _profile_matches(args: Any, profile_id: str) -> bool:
@@ -111,17 +122,15 @@ def _fresh_live_exposure(store: Any, profile_id: str, max_age_seconds: int) -> d
             "AND a.result_json IS NOT NULL AND t.family='campaign' ORDER BY a.id DESC LIMIT 50"
         ).fetchall()
     for row in rows:
+        created = _time(row["created_at"])
+        if not created or created.timestamp() < cutoff:
+            continue
         try:
-            created = datetime.fromisoformat(str(row["created_at"] or ""))
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=UTC)
-            if created.timestamp() < cutoff:
-                continue
             args = json.loads(row["args_json"] or "{}")
-            if not _profile_matches(args, profile_id):
-                continue
             result = json.loads(row["result_json"] or "null")
         except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not _profile_matches(args, profile_id):
             continue
         campaigns = _campaign_rows(result)
         if campaigns is None:
@@ -131,6 +140,8 @@ def _fresh_live_exposure(store: Any, profile_id: str, max_age_seconds: int) -> d
             campaign_id = str(_first(campaign, "campaignId", "campaign_id", "id") or "").strip()
             budget = _campaign_budget(campaign)
             if campaign_id and budget is not None:
+                # Count PAUSED Campaign budgets too. This is deliberately conservative:
+                # a PAUSED autonomous graph reserves room before staged activation.
                 budgets[campaign_id] = max(0.0, budget)
         if budgets or not campaigns:
             return {
@@ -197,7 +208,7 @@ def _exploration(decision: dict[str, Any]) -> bool:
     return bool(_EXPLORE_NAME.match(name))
 
 
-def _positive_budget_delta(decision: dict[str, Any], observed: dict[str, float] | None = None) -> float:
+def _positive_budget_delta(decision: dict[str, Any]) -> float:
     action = str(decision.get("action_type") or "").lower()
     body = _payload(decision)
     args = _approved_args(decision)
@@ -210,18 +221,12 @@ def _positive_budget_delta(decision: dict[str, Any], observed: dict[str, float] 
         except (TypeError, ValueError):
             return 0.0
         return max(0.0, after - before)
-    if action in {"enable", "resume", "update_state"} and str(decision.get("expected_family") or "") == "campaign":
-        state = str(_first(args, "state", "status") or body.get("after") or "").upper()
-        if state != "ENABLED":
-            return 0.0
-        campaign_id = str(decision.get("entity_id") or "")
-        if observed and campaign_id in observed:
-            return max(0.0, float(observed[campaign_id]))
     return 0.0
 
 
-def _committed_today(store: Any, profile_id: str, after_id: int | None = None) -> tuple[float, float]:
+def _committed_today(store: Any, profile_id: str, observed_at: Any = None) -> tuple[float, float]:
     today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    observed = _time(observed_at)
     with store.connection() as conn:
         rows = conn.execute(
             "SELECT * FROM decisions WHERE profile_id=? AND created_at>=? ORDER BY created_at,id",
@@ -231,10 +236,16 @@ def _committed_today(store: Any, profile_id: str, after_id: int | None = None) -
     exploration = 0.0
     for row in rows:
         item = store._decision_dict(row)
-        if item.get("status") not in _ACTIVE_DECISION_STATES:
+        status = str(item.get("status") or "")
+        if status not in _COUNTABLE_STATES:
             continue
         delta = _positive_budget_delta(item)
         if delta <= 0:
+            continue
+        executed = _time(item.get("executed_at"))
+        # Pending plans always reserve room. Executed/verified deltas reserve room
+        # only when the latest Campaign observation predates the mutation.
+        if status not in _PENDING_STATES and observed and executed and executed <= observed:
             continue
         total += delta
         if _exploration(item):
@@ -254,17 +265,14 @@ def budget_status(store: Any, profile_id: str | None = None, *, require_fresh: b
         profile_id = str(enabled[0].get("profile_id") or "") if len(enabled) == 1 else ""
     if not profile_id:
         return {
-            "enabled": True,
-            "profile_bound": False,
-            "hard_cap": cap,
-            "exploration_pct": exploration_pct,
-            "fresh": False,
-            "increase_allowed": False,
+            "enabled": True, "profile_bound": False, "hard_cap": cap,
+            "exploration_pct": exploration_pct, "fresh": False,
+            "increase_allowed": False, "exploration_allowed": False,
             "reason": "one enabled Profile is required to compute the daily budget envelope",
         }
     live = _fresh_live_exposure(store, profile_id, max_age)
     observation = live or _snapshot_exposure(store, profile_id)
-    committed, exploration_committed = _committed_today(store, profile_id)
+    committed, exploration_committed = _committed_today(store, profile_id, (observation or {}).get("observed_at"))
     base = float((observation or {}).get("exposure") or 0.0)
     projected = round(base + committed, 2)
     ratio = projected / cap * 100 if cap > 0 else 100.0
@@ -286,12 +294,15 @@ def budget_status(store: Any, profile_id: str | None = None, *, require_fresh: b
         "exploration_stop_pct": soft_pct,
         "conservative_pct": conservative_pct,
         "fresh": bool(live),
+        "observation_available": observation is not None,
         "observation": {key: value for key, value in (observation or {}).items() if key != "campaign_budgets"},
         "increase_allowed": bool(live) and projected < cap and ratio < conservative_pct,
         "exploration_allowed": bool(live) and projected < cap and ratio < soft_pct and exploration_committed < exploration_cap,
     }
     if require_fresh and not live:
         result["reason"] = "a fresh structured Amazon Campaign read is required before increasing exposure"
+    elif observation is None:
+        result["reason"] = "no Campaign budget observation is available"
     elif projected >= cap:
         result["reason"] = "daily budget exposure hard cap reached"
     elif ratio >= conservative_pct:
@@ -307,7 +318,8 @@ def _plan_decisions(payload: dict[str, Any]) -> list[dict[str, Any]]:
     profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else {}
     profile_id = str(profile.get("profile_id") or profile.get("id") or "")
     rows: list[dict[str, Any]] = []
-    for index, action in enumerate(payload.get("actions") if isinstance(payload.get("actions"), list) else []):
+    actions = payload.get("actions") if isinstance(payload.get("actions"), list) else []
+    for index, action in enumerate(actions):
         if not isinstance(action, dict):
             continue
         args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
@@ -318,11 +330,8 @@ def _plan_decisions(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "action_type": str(action.get("action_type") or ""),
             "payload": {
                 "approved_args": args,
-                "before": action.get("before"),
-                "after": action.get("after"),
-                "field": action.get("field"),
-                "exploration": action.get("exploration") is True,
-                "intent": action.get("intent"),
+                "before": action.get("before"), "after": action.get("after"), "field": action.get("field"),
+                "exploration": action.get("exploration") is True, "intent": action.get("intent"),
                 "plan_index": index,
             },
         })
@@ -361,9 +370,9 @@ def _install_store() -> None:
         result = original_dashboard(self)
         profiles = [row for row in result.get("profiles", []) if row and row.get("enabled")]
         profile_id = str(profiles[0].get("profile_id") or "") if len(profiles) == 1 else None
-        status = budget_status(self, profile_id)
-        status.pop("profile_id", None)
-        result["budget_guard"] = status
+        state = budget_status(self, profile_id)
+        state.pop("profile_id", None)
+        result["budget_guard"] = state
         return result
 
     Store.dashboard = dashboard
@@ -410,7 +419,7 @@ def _install_service() -> None:
         result["budget_guard"] = state
         result["instructions"] += (
             " Daily budget is a hard controller boundary. Historical performance evidence controls action size, not permission to explore. "
-            "Before any exposure-increasing or exploratory managed plan, obtain a fresh Amazon Campaign read. "
+            "Before exposure-increasing execution, obtain a fresh Amazon Campaign read. "
             "Use small HERMES-SP-EXP-* PAUSED experiments inside the exploration pool; never exceed the hard cap."
         )
         return result
@@ -422,18 +431,20 @@ def _install_service() -> None:
         positive = sum(_positive_budget_delta(item) for item in decisions)
         exploratory = sum(_positive_budget_delta(item) for item in decisions if _exploration(item))
         if positive > 0:
-            state = budget_status(self.store, profile_id, require_fresh=True)
-            if not state.get("fresh"):
+            state = budget_status(self.store, profile_id)
+            if not state.get("observation_available"):
                 raise ValueError(str(state.get("reason")))
-            if float(state.get("projected_exposure") or 0) + positive > float(state.get("hard_cap") or 0) + 1e-9:
+            projected_after = float(state.get("projected_exposure") or 0) + positive
+            if projected_after > float(state.get("hard_cap") or 0) + 1e-9:
                 raise ValueError("managed plan would exceed the account daily budget exposure hard cap")
+            utilization_after = projected_after / float(state.get("hard_cap") or 1) * 100
             if exploratory > 0:
-                if not state.get("exploration_allowed"):
-                    raise ValueError(str(state.get("reason")))
+                if utilization_after >= float(state.get("exploration_stop_pct") or 80):
+                    raise ValueError("managed plan would cross the exploration stop threshold")
                 if exploratory > float(state.get("exploration_remaining") or 0) + 1e-9:
                     raise ValueError("managed plan would exceed the daily exploration budget pool")
-            elif not state.get("increase_allowed"):
-                raise ValueError(str(state.get("reason")))
+            elif utilization_after >= float(state.get("conservative_pct") or 90):
+                raise ValueError("managed plan would enter conservative mode with a positive exposure increase")
         return original_managed_plan(self, payload, actor)
 
     ControlService._guardrail_check = guard
