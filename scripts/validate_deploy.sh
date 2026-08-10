@@ -30,6 +30,7 @@ fi
 python3 -m venv "$TMP/installed"
 "$TMP/installed/bin/pip" install --no-deps "$TMP"/dist/*.whl >/dev/null
 EXPECTED_VERSION="$("$TMP/installed/bin/python" -c 'import amazon_ads_control; print(amazon_ads_control.__version__)')"
+[[ "$EXPECTED_VERSION" == "4.2.1" ]]
 "$TMP/installed/bin/amazon-ads-control" --help >/dev/null
 [[ "$("$TMP/installed/bin/amazon-ads-control" --version)" == *"$EXPECTED_VERSION"* ]]
 "$TMP/installed/bin/amazon-ads-worker" --help >/dev/null
@@ -37,8 +38,6 @@ EXPECTED_VERSION="$("$TMP/installed/bin/python" -c 'import amazon_ads_control; p
 "$TMP/installed/bin/amazon-ads-backtest" --help >/dev/null
 export ADS_CONTROL_HOST=127.0.0.1 ADS_CONTROL_PORT=8790 ADS_CONTROL_DB="$TMP/state.db"
 export ADS_CONTROL_AGENT_TOKEN="$(python3 -c 'print("x"*48)')"
-# Default production trust boundary: Web approval works with no human approval
-# credential in the Hermes/control environment.
 export ADS_CONTROL_OPERATOR_TOKEN=
 export ADS_CONTROL_ENABLE_COMMAND_APPROVAL=false
 export ADS_MCP_DEFAULT_REGION=fe
@@ -47,13 +46,18 @@ export ADS_CONTROL_PASSWORD_HASH="$(PYTHONPATH="$ROOT/control-plane" python3 -c 
 "$TMP/installed/bin/amazon-ads-control" --check >/dev/null
 INSTALLED_SITE="$("$TMP/installed/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
 PYTHONPATH="$INSTALLED_SITE" python3 "$ROOT/scripts/control_cli.py" storage-status --database "$TMP/state.db" >/dev/null
+
 prepare_source "$TMP/source"
-HERMES_HOME="$TMP/hermes" bash "$TMP/source/scripts/install.sh" >/dev/null
+HERMES_HOME="$TMP/hermes" HERMES_BIN= bash "$TMP/source/scripts/install.sh" >/dev/null 2>&1
 [[ -L "$TMP/hermes/plugins/amazon-ads-control" ]]
+
 grep -q '^ADS_CONTROL_OPERATOR_TOKEN=$' deploy/control.env.example
 grep -q '^ADS_CONTROL_ENABLE_COMMAND_APPROVAL=false$' deploy/control.env.example
 grep -Eq '^ADS_MCP_DEFAULT_REGION=(na|eu|fe)$' deploy/control.env.example
 grep -q '^ADS_MCP_TOOLSETS=' deploy/control.env.example
+grep -q '^HERMES_HOME=' deploy/control.env.example
+grep -q '^HERMES_PROFILE=' deploy/control.env.example
+grep -q '^HERMES_BIN=' deploy/control.env.example
 grep -q '^ADS_CONTROL_MAINTENANCE_INTERVAL=' deploy/control.env.example
 grep -q '^ADS_CONTROL_STORAGE_HARD_LIMIT_MB=' deploy/control.env.example
 grep -q '^ADS_CONTROL_OUTBOX_MAX_BYTES=' deploy/control.env.example
@@ -64,12 +68,38 @@ if grep -Fq 'proxy_set_header Origin $scheme://$host;' deploy/nginx.conf; then
   echo "nginx must not synthesize a trusted Origin" >&2
   exit 1
 fi
+
+# Scheduled orchestrator is a Hermes trigger only. It must not regain root,
+# direct Amazon OAuth/MCP or database-mutation authority.
+grep -q '^User=amazonbot$' deploy/hermes-amazon-ads-us-orchestrator.service
+grep -q '^Group=amazonbot$' deploy/hermes-amazon-ads-us-orchestrator.service
+! grep -q '^User=root$' deploy/hermes-amazon-ads-us-orchestrator.service
+! grep -q '^ExecStartPre=.*refresh_amazon_ads_token' deploy/hermes-amazon-ads-us-orchestrator.service
+grep -q '^MemoryHigh=350M$' deploy/hermes-amazon-ads-us-orchestrator.service
+grep -q '^MemoryMax=550M$' deploy/hermes-amazon-ads-us-orchestrator.service
+grep -q '^CPUQuota=80%$' deploy/hermes-amazon-ads-us-orchestrator.service
+grep -q '^TasksMax=128$' deploy/hermes-amazon-ads-us-orchestrator.service
+grep -q '^Unit=hermes-amazon-ads-us-orchestrator.service$' deploy/hermes-amazon-ads-us-orchestrator.timer
+! grep -Eq 'advertising-ai\.amazon\.com|AMAZON_ADS_MCP_ACCESS_TOKEN|sqlite3|record_action|normalized_snapshot_gzip' scripts/us-only-daily-orchestrator.py
+
+a="$(grep -c '^version = "4.2.1"$' pyproject.toml)"
+b="$(grep -c '^__version__ = "4.2.1"$' control-plane/amazon_ads_control/__init__.py)"
+[[ "$a" == "1" && "$b" == "1" ]]
+python3 - <<'PY'
+import json
+from pathlib import Path
+manifest = json.loads(Path('package-manifest.json').read_text())
+assert manifest['version'] == '4.2.1'
+PY
+
 cd "$ROOT"
 if command -v nginx >/dev/null 2>&1; then
   { echo "pid $TMP/nginx.pid;"; echo "error_log $TMP/error.log;"; echo 'events {}'; echo 'http {'; echo "access_log $TMP/access.log;"; echo 'server {'; echo 'listen 8080;'; cat deploy/nginx.conf; echo '}'; echo '}'; } > "$TMP/nginx.conf"
   nginx -t -c "$TMP/nginx.conf" -p "$TMP" >/dev/null
 fi
+
 if command -v systemd-analyze >/dev/null 2>&1; then
+  : > "$TMP/control.env"
   sed -e 's/User=amazonbot/User=root/' -e 's/Group=amazonbot/Group=root/' \
       -e "s#WorkingDirectory=/opt/hermes-amazon-ads-automation#WorkingDirectory=$ROOT#" \
       -e "s#EnvironmentFile=/etc/hermes-amazon-ads-control.env#EnvironmentFile=-$TMP/control.env#" \
@@ -77,7 +107,20 @@ if command -v systemd-analyze >/dev/null 2>&1; then
       -e "s#ExecStart=/opt/hermes-amazon-ads-automation/.venv/bin/python -m amazon_ads_control.server#ExecStart=$TMP/installed/bin/python -m amazon_ads_control.server#" \
       -e "s#ReadWritePaths=/var/lib/hermes-amazon-ads-control#ReadWritePaths=$TMP#" \
       deploy/amazon-ads-control.service > "$TMP/control.service"
-  : > "$TMP/control.env"
   systemd-analyze verify "$TMP/control.service" >/dev/null
+
+  mkdir -p "$TMP/orchestrator-units"
+  sed -e 's/User=amazonbot/User=root/' -e 's/Group=amazonbot/Group=root/' \
+      -e "s#WorkingDirectory=/opt/hermes-amazon-ads-automation#WorkingDirectory=$ROOT#" \
+      -e "s#EnvironmentFile=/etc/hermes-amazon-ads-control.env#EnvironmentFile=-$TMP/control.env#" \
+      -e "s#Environment=ADS_AUTOPILOT_ROOT=/opt/hermes-amazon-ads-automation#Environment=ADS_AUTOPILOT_ROOT=$ROOT#" \
+      -e "s#ExecStart=/bin/bash /opt/hermes-amazon-ads-automation/scripts/us-only-daily-orchestrator.sh#ExecStart=/bin/bash $ROOT/scripts/us-only-daily-orchestrator.sh#" \
+      -e "s#ReadWritePaths=/var/lib/hermes-amazon-ads-control /var/lib/hermes-studio /run/lock#ReadWritePaths=$TMP#" \
+      deploy/hermes-amazon-ads-us-orchestrator.service > "$TMP/orchestrator-units/hermes-amazon-ads-us-orchestrator.service"
+  cp deploy/hermes-amazon-ads-us-orchestrator.timer "$TMP/orchestrator-units/hermes-amazon-ads-us-orchestrator.timer"
+  systemd-analyze verify \
+    "$TMP/orchestrator-units/hermes-amazon-ads-us-orchestrator.service" \
+    "$TMP/orchestrator-units/hermes-amazon-ads-us-orchestrator.timer" >/dev/null
 fi
+
 echo "deploy-validation: OK"
