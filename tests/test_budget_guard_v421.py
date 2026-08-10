@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import unittest
 
 from amazon_ads_control import budget_guard
@@ -28,7 +28,7 @@ class BudgetGuardV421Tests(unittest.TestCase):
     def tearDown(self):
         self.env.close()
 
-    def live_read(self, *budgets: float) -> int:
+    def live_read(self, *budgets: float, created_at: str | None = None) -> int:
         campaigns = []
         for index, amount in enumerate(budgets, 1):
             campaigns.append({
@@ -36,7 +36,7 @@ class BudgetGuardV421Tests(unittest.TestCase):
                 "state": "ENABLED",
                 "budgets": [{"budgetValue": {"monetaryBudgetValue": {"monetaryBudget": {"value": amount}}}}],
             })
-        return self.env.store.record_action(
+        action_id = self.env.store.record_action(
             task_id=None, session_id="main-read", actor_role="main", phase="after",
             tool_name=READ_CAMPAIGN["registered_name"], operation="read", allowed=True,
             args={"body": {"accessRequestedAccount": {"profileId": "p1"}}},
@@ -44,6 +44,10 @@ class BudgetGuardV421Tests(unittest.TestCase):
             reason="fresh account budget observation", result_summary="campaign read",
             result={"campaigns": campaigns}, duration_ms=1,
         )
+        if created_at:
+            with self.env.store.connection() as conn:
+                conn.execute("UPDATE actions SET created_at=? WHERE id=?", (created_at, action_id))
+        return action_id
 
     def add_campaign_decision(self, budget: float, *, exploration: bool = False):
         raw = {
@@ -64,6 +68,14 @@ class BudgetGuardV421Tests(unittest.TestCase):
             data_quality={}, kpis={}, snapshot={}, decisions=[raw], created_by="test",
         )
         return self.env.store.list_decisions(cycle_id=cycle["id"])[0]
+
+    def reserve_directly(self, decision_id: str) -> None:
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        with self.env.store.connection() as conn:
+            conn.execute(
+                "UPDATE decisions SET status='reserved',reserved_at=?,reservation_token='test-token' WHERE id=?",
+                (now, decision_id),
+            )
 
     def test_fresh_campaign_read_calculates_account_exposure(self):
         action_id = self.live_read(30, 25.5)
@@ -102,9 +114,10 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.assertFalse(state["increase_allowed"])
         self.assertIn("fresh structured Amazon Campaign read", state["reason"])
 
-    def test_pending_campaign_reserves_budget_and_exploration_pool(self):
+    def test_reserved_campaign_reserves_budget_and_exploration_pool(self):
         self.live_read(50)
-        self.add_campaign_decision(10, exploration=True)
+        decision = self.add_campaign_decision(10, exploration=True)
+        self.reserve_directly(decision["id"])
         state = budget_guard.budget_status(self.env.store, "p1")
         self.assertEqual(state["committed_positive_delta_today"], 10)
         self.assertEqual(state["projected_exposure"], 60)
@@ -112,17 +125,19 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.assertEqual(state["exploration_remaining"], 10)
 
     def test_newer_live_read_absorbs_executed_budget_delta_without_double_count(self):
-        self.live_read(40)
+        base_time = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=3)
+        self.live_read(40, created_at=base_time.isoformat())
         decision = self.add_campaign_decision(10)
-        now = datetime.now(UTC).isoformat(timespec="seconds")
+        executed = base_time + timedelta(seconds=1)
         with self.env.store.connection() as conn:
             conn.execute(
                 "UPDATE decisions SET status='verified',executed_at=?,verified_at=? WHERE id=?",
-                (now, now, decision["id"]),
+                (executed.isoformat(), executed.isoformat(), decision["id"]),
             )
         before = budget_guard.budget_status(self.env.store, "p1")
         self.assertEqual(before["committed_positive_delta_today"], 10)
-        self.live_read(40, 10)
+        observed = base_time + timedelta(seconds=2)
+        self.live_read(40, 10, created_at=observed.isoformat())
         after = budget_guard.budget_status(self.env.store, "p1")
         self.assertEqual(after["observed_exposure"], 50)
         self.assertEqual(after["committed_positive_delta_today"], 0)
