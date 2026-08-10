@@ -19,6 +19,7 @@ from .db import UTC, future_iso, now_iso
 _INSTALLED = False
 _PENDING = {"reserved", "pending", "uncertain"}
 _COUNTABLE = _PENDING | {"executed", "verified"}
+OVERDELIVERY_SETTING = "amazon_daily_budget_max_spend_multiplier"
 
 
 def _settings(conn) -> dict[str, Any]:
@@ -29,9 +30,11 @@ def _settings(conn) -> dict[str, Any]:
         "budget_guard_exploration_stop_pct",
         "budget_guard_conservative_pct",
         "budget_guard_live_read_max_age_seconds",
+        OVERDELIVERY_SETTING,
     }
+    placeholders = ",".join("?" for _ in wanted)
     rows = conn.execute(
-        "SELECT key,value FROM settings WHERE key IN (?,?,?,?,?,?)",
+        f"SELECT key,value FROM settings WHERE key IN ({placeholders})",
         tuple(sorted(wanted)),
     ).fetchall()
     return {str(row["key"]): json.loads(row["value"]) for row in rows}
@@ -91,11 +94,13 @@ def _fresh_complete_live_exposure(conn, profile_id: str, max_age_seconds: int) -
             budgets[campaign_id] = max(0.0, float(budget))
         if not complete:
             continue
+        base_budget = round(sum(budgets.values()), 2)
         return {
             "source": "fresh_complete_amazon_campaign_read",
             "action_id": int(row["id"]),
             "observed_at": str(row["created_at"]),
-            "exposure": round(sum(budgets.values()), 2),
+            "campaign_budget_sum": base_budget,
+            "exposure": base_budget,
             "campaign_count": len(budgets),
             "fresh": True,
         }
@@ -134,6 +139,83 @@ def _committed_inside_transaction(store, conn, profile_id: str, observed_at: str
     return round(committed, 2), round(exploration, 2)
 
 
+def _raw_committed(store, profile_id: str, observed_at: str | None) -> tuple[float, float]:
+    with store.connection() as conn:
+        return _committed_inside_transaction(store, conn, profile_id, observed_at or "", "")
+
+
+def _owner_budget_status(store, profile_id: str | None = None, *, require_fresh: bool = False) -> dict[str, Any]:
+    from . import budget_guard
+
+    settings = store.get_settings()
+    cap = float(settings.get("max_daily_ad_spend", 100.0))
+    exploration_pct = float(settings.get("exploration_budget_pct", 20.0))
+    stop_pct = float(settings.get("budget_guard_exploration_stop_pct", 80.0))
+    conservative_pct = float(settings.get("budget_guard_conservative_pct", 90.0))
+    max_age = int(settings.get("budget_guard_live_read_max_age_seconds", 900))
+    multiplier = float(settings.get(OVERDELIVERY_SETTING, 2.0))
+    if not profile_id:
+        enabled = [row for row in store.list_profiles() if row and row.get("enabled")]
+        profile_id = str(enabled[0].get("profile_id") or "") if len(enabled) == 1 else ""
+    if not profile_id:
+        return {
+            "enabled": True, "profile_bound": False, "hard_cap": round(cap, 2),
+            "exploration_pct": exploration_pct, "fresh": False,
+            "increase_allowed": False, "exploration_allowed": False,
+            "amazon_overdelivery_multiplier": multiplier,
+            "reason": "one enabled Profile is required to compute the daily budget envelope",
+        }
+
+    live = _fresh_complete_for_store(store, profile_id, max_age)
+    fallback = budget_guard._snapshot_exposure(store, profile_id)
+    observation = live or fallback
+    raw_base = float((observation or {}).get("campaign_budget_sum", (observation or {}).get("exposure", 0.0)) or 0.0)
+    committed, exploration_committed = _raw_committed(
+        store, profile_id, (observation or {}).get("observed_at")
+    )
+    raw_projected = raw_base + committed
+    projected = round(raw_projected * multiplier, 2)
+    exploration_committed_exposure = round(exploration_committed * multiplier, 2)
+    ratio = projected / cap * 100.0 if cap > 0 else 100.0
+    exploration_cap = round(cap * exploration_pct / 100.0, 2)
+    result = {
+        "enabled": True,
+        "profile_bound": True,
+        "profile_id": profile_id,
+        "hard_cap": round(cap, 2),
+        "amazon_overdelivery_multiplier": multiplier,
+        "observed_campaign_budget_sum": round(raw_base, 2),
+        "committed_campaign_budget_delta_today": round(committed, 2),
+        "projected_exposure": projected,
+        "remaining": round(max(0.0, cap - projected), 2),
+        "utilization_pct": round(ratio, 2),
+        "exploration_pct": exploration_pct,
+        "exploration_cap": exploration_cap,
+        "exploration_committed_today": exploration_committed_exposure,
+        "exploration_remaining": round(max(0.0, exploration_cap - exploration_committed_exposure), 2),
+        "exploration_stop_pct": stop_pct,
+        "conservative_pct": conservative_pct,
+        "fresh": bool(live),
+        "observation_available": observation is not None,
+        "observation": dict(observation or {}),
+        "increase_allowed": bool(live) and projected < cap and ratio < conservative_pct,
+        "exploration_allowed": bool(live) and projected < cap and ratio < stop_pct and exploration_committed_exposure < exploration_cap,
+    }
+    if require_fresh and not live:
+        result["reason"] = "a fresh complete unpaginated Amazon Campaign budget read is required before increasing exposure"
+    elif observation is None:
+        result["reason"] = "no Campaign budget observation is available"
+    elif projected >= cap:
+        result["reason"] = "daily maximum-spend exposure hard cap reached"
+    elif ratio >= conservative_pct:
+        result["reason"] = "daily maximum-spend exposure entered conservative mode"
+    elif ratio >= stop_pct:
+        result["reason"] = "daily maximum-spend exposure stopped new exploration"
+    else:
+        result["reason"] = "within daily maximum-spend exposure envelope"
+    return result
+
+
 def _enforce_atomic_budget(store, conn, row) -> None:
     decision = store._decision_dict(row)
     delta = _positive_budget_delta(decision)
@@ -148,6 +230,7 @@ def _enforce_atomic_budget(store, conn, row) -> None:
         "budget_guard_exploration_stop_pct",
         "budget_guard_conservative_pct",
         "budget_guard_live_read_max_age_seconds",
+        OVERDELIVERY_SETTING,
     }
     if not required.issubset(settings):
         raise ValueError("daily budget exposure settings are incomplete")
@@ -156,8 +239,9 @@ def _enforce_atomic_budget(store, conn, row) -> None:
     stop_pct = float(settings["budget_guard_exploration_stop_pct"])
     conservative_pct = float(settings["budget_guard_conservative_pct"])
     max_age = int(settings["budget_guard_live_read_max_age_seconds"])
-    if cap <= 0:
-        raise ValueError("daily budget exposure hard cap must be positive")
+    multiplier = float(settings[OVERDELIVERY_SETTING])
+    if cap <= 0 or multiplier < 1:
+        raise ValueError("daily budget exposure configuration is invalid")
 
     profile_id = str(decision.get("profile_id") or "").strip()
     if not profile_id:
@@ -169,19 +253,31 @@ def _enforce_atomic_budget(store, conn, row) -> None:
     committed, exploration_committed = _committed_inside_transaction(
         store, conn, profile_id, observation["observed_at"], str(decision["id"])
     )
-    projected_after = float(observation["exposure"]) + committed + delta
+    projected_after = (float(observation["campaign_budget_sum"]) + committed + delta) * multiplier
     if projected_after > cap + 1e-9:
-        raise ValueError("planned write would exceed the account daily budget exposure hard cap")
+        raise ValueError("planned write would exceed the owner daily maximum-spend exposure hard cap")
 
     utilization_after = projected_after / cap * 100.0
     if _exploration(decision):
         exploration_cap = cap * exploration_pct / 100.0
-        if exploration_committed + delta > exploration_cap + 1e-9:
-            raise ValueError("planned write would exceed the daily exploration budget pool")
+        exploration_after = (exploration_committed + delta) * multiplier
+        if exploration_after > exploration_cap + 1e-9:
+            raise ValueError("planned write would exceed the daily exploration maximum-spend pool")
         if utilization_after >= stop_pct - 1e-9:
             raise ValueError("new exploration is stopped at the configured budget utilization threshold")
     elif utilization_after >= conservative_pct - 1e-9:
         raise ValueError("positive exposure increases stop at the configured conservative threshold")
+
+
+def _configure_overdelivery() -> None:
+    from . import db
+
+    # Amazon sponsored ads may spend up to 100% above average daily budget on
+    # a high-traffic day. Keep the worst-case 2x multiplier locked until a
+    # future live account-policy attestation safely proves a smaller bound.
+    db.DEFAULT_SETTINGS[OVERDELIVERY_SETTING] = 2.0
+    db.NUMERIC_SETTING_RANGES[OVERDELIVERY_SETTING] = (1.0, 2.0)
+    db.SAFETY_LOCKED_SETTINGS[OVERDELIVERY_SETTING] = 2.0
 
 
 def _install_store() -> None:
@@ -261,16 +357,19 @@ def _install_store() -> None:
 
 def _install_budget_observation() -> None:
     # budget_status() and the fast service guard must use the same strict
-    # completeness/pagination rule as the authoritative transaction gate.
+    # completeness/pagination rule and the same Amazon overdelivery model as
+    # the authoritative transaction gate.
     from . import budget_guard
 
     budget_guard._fresh_live_exposure = _fresh_complete_for_store
+    budget_guard.budget_status = _owner_budget_status
 
 
 def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    _configure_overdelivery()
     _install_store()
     _install_budget_observation()
     _INSTALLED = True
