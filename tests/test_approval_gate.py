@@ -11,6 +11,15 @@ from amazon_ads_control.service import ControlService
 
 UTC = timezone.utc
 
+READ_CAMPAIGN = {
+    "registered_name": "mcp_amazon_ads_campaign_management_query_campaign",
+    "native_name": "campaign_management-query_campaign",
+    "source": "hermes-registry:na",
+    "schema": {
+        "description": "Query campaigns",
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
 CREATE_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_create_campaign",
     "native_name": "campaign_management-create_campaign",
@@ -59,6 +68,7 @@ class ApprovalGateTests(unittest.TestCase):
         self.store = Store(Path(self.temp.name) / "state.db")
         self.service = ControlService(self.store)
         self.store.sync_catalog([
+            descriptor_from_payload(READ_CAMPAIGN),
             descriptor_from_payload(CREATE_CAMPAIGN),
             descriptor_from_payload(ACCOUNT_WRITE),
         ])
@@ -67,6 +77,17 @@ class ApprovalGateTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def record_fresh_budget_observation(self) -> None:
+        self.store.record_action(
+            task_id=None, session_id="main-budget-read", actor_role="main", phase="after",
+            tool_name=READ_CAMPAIGN["registered_name"], operation="read", allowed=True,
+            args={"body": {"accessRequestedAccount": {"profileId": "p1"}}},
+            success=True, outcome_status="COMPLETED", structured_result=True,
+            reason="fresh full account campaign budget observation",
+            result_summary="empty account",
+            result={"campaigns": []}, duration_ms=1,
+        )
 
     def managed_plan(self):
         return self.service.create_managed_plan({
@@ -123,6 +144,7 @@ class ApprovalGateTests(unittest.TestCase):
             "goal": f"[ads-task:{task['id']}] [ads-role:executor] execute exact plan",
             "model": "MiniMax-M3",
         })
+        self.record_fresh_budget_observation()
         authorization = self.service.authorize_tool({
             "tool_name": CREATE_CAMPAIGN["registered_name"],
             "args": self.args,
