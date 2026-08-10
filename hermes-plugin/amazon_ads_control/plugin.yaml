@@ -1,6 +1,6 @@
 name: amazon-ads-control
-version: 3.2.0
-description: Approval-gated, deterministic and independently verified Amazon Ads full autopilot for Hermes
+version: 4.2.1
+description: Budget-bounded, independently verified Amazon Ads Sponsored Products full-managed autonomy for Hermes
 requires_env:
   - name: ADS_CONTROL_AGENT_TOKEN
     description: Machine token used by Hermes tools and lifecycle hooks
