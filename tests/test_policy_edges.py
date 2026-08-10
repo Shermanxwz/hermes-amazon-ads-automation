@@ -8,9 +8,18 @@ class PolicyEdgeTests(unittest.TestCase):
         self.assertEqual(classify_tool("mcp_amazon_ads_campaign_query_campaign"),"read")
         self.assertEqual(classify_tool("mcp_amazon_ads_campaign_update_campaign"),"write")
         self.assertEqual(classify_tool("mcp_amazon_ads_mystery"),"unknown")
-    def test_redaction_limits_depth_and_size(self):
-        nested={"password":"secret","safe":"x","deep":{"a":{"b":{"c":{"d":{"e":{"token":"secret"}}}}}}}
-        result=redact(nested); self.assertEqual(result["password"],"[redacted]"); self.assertIn("truncated",str(result))
+    def test_redaction_preserves_deep_evidence_but_limits_extreme_depth_and_size(self):
+        nested={
+            "password":"secret",
+            "safe":"x",
+            "deep":{"a":{"b":{"c":{"d":{"e":{"token":"secret","budgetValue":{"monetaryBudgetValue":{"monetaryBudget":{"value":25}}}}}}}}},
+            "extreme":{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":{"k":{"l":"too-deep"}}}}}}}}}}}},
+        }
+        result=redact(nested)
+        self.assertEqual(result["password"],"[redacted]")
+        self.assertEqual(result["deep"]["a"]["b"]["c"]["d"]["e"]["token"],"[redacted]")
+        self.assertEqual(result["deep"]["a"]["b"]["c"]["d"]["e"]["budgetValue"]["monetaryBudgetValue"]["monetaryBudget"]["value"],25)
+        self.assertIn("truncated",str(result["extreme"]))
         self.assertLessEqual(len(redact_text("x"*9000)),8001)
         self.assertNotIn("abc",redact_text("refresh_token=abc"))
     def test_planned_matching(self):
