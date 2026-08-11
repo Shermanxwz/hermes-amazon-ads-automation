@@ -34,14 +34,6 @@ def _activation_source(conn, decision: dict[str, Any]) -> dict[str, Any] | None:
     return _row_decision(row) if row else None
 
 
-def _paused_create(br, decision: dict[str, Any]) -> bool:
-    return (
-        str(decision.get("action_type") or "").lower() == "create_campaign"
-        and "PAUSED" in br._requested_states(decision)
-        and "ENABLED" not in br._requested_states(decision)
-    )
-
-
 def _settings_or_raise(br, conn) -> tuple[dict[str, Any], float, float, float, float, int, float]:
     settings = br._settings(conn)
     if settings.get("daily_budget_hard_cap_enabled") is not True:
@@ -153,11 +145,6 @@ def install() -> None:
 
     def enforce_atomic_budget(store, conn, row) -> None:
         decision = store._decision_dict(row)
-        if _paused_create(br, decision):
-            # Creating a PAUSED Campaign cannot spend. Its budget becomes a
-            # committed reservation after the create settles and is enforced
-            # again before the independently verified ENABLE transition.
-            return
         source = _activation_source(conn, decision)
         if (
             br._requests_enable(decision)
