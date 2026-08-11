@@ -46,6 +46,17 @@ class SealedActivationV6Tests(unittest.TestCase):
             descriptor_from_payload(READ_CAMPAIGN),
         ])
         self.env.store.update_settings({"mode": "autopilot", "execution_enabled": True})
+        # A structural create reserves its future Campaign exposure even while
+        # the entity is created PAUSED. Production therefore requires a fresh,
+        # complete Profile-bound Campaign observation before reservation.
+        self.env.store.record_action(
+            task_id=None, session_id="initial-budget-read", actor_role="main",
+            phase="after", tool_name=READ_CAMPAIGN["registered_name"],
+            operation="read", allowed=True,
+            args={"body": {"accessRequestedAccount": {"profileId": "p1"}}},
+            success=True, outcome_status="success", structured_result=True,
+            result={"campaigns": []},
+        )
 
     def tearDown(self):
         self.env.close()
@@ -95,7 +106,10 @@ class SealedActivationV6Tests(unittest.TestCase):
             tool_name=READ_CAMPAIGN["registered_name"],
             operation="read",
             allowed=True,
-            args={"campaignId": "AMZ-CAMPAIGN-1"},
+            args={
+                "campaignId": "AMZ-CAMPAIGN-1",
+                "body": {"accessRequestedAccount": {"profileId": "p1"}},
+            },
             success=True,
             outcome_status="success",
             structured_result=True,
