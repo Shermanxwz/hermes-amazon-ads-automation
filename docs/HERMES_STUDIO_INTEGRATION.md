@@ -1,12 +1,12 @@
 # Hermes Studio Integration Contract
 
-Hermes Studio is the owner's chat/Web surface. It does **not** replace the Amazon Ads Control trust boundary. Studio chat, scheduled runs and CLI one-shots must select the same Hermes Profile that has `amazon-ads-control` enabled.
+Hermes Studio is the owner's primary chat/Web surface. It does **not** replace the Amazon Ads Control trust boundary. Studio chat, scheduled runs and CLI one-shots must select the same Hermes Profile that has `amazon-ads-control` enabled.
 
 ## Required runtime identity
 
-Use one server-side Hermes home/profile pair for all three entry points:
+Use one server-side Hermes **base home + Profile** pair for all entry points:
 
-- Hermes Studio agent bridge;
+- Hermes Studio Agent Bridge;
 - interactive/CLI Hermes sessions;
 - `hermes-amazon-ads-us-orchestrator.service` scheduled one-shot.
 
@@ -18,11 +18,18 @@ HERMES_PROFILE=default
 HERMES_BIN=/opt/hermes-agent/venv/bin/hermes
 ```
 
-The exact Profile name may differ. What matters is that Studio and the scheduled service select the **same** Profile home/configuration.
+`HERMES_HOME` should normally be the Hermes **base home**. Hermes Studio resolves Profiles as:
+
+```text
+default      -> <base>/
+named profile -> <base>/profiles/<name>/
+```
+
+The installer and validator also accept an already-resolved named Profile home, but normalize CLI execution back to the base home so Studio, Hermes and the orchestrator cannot silently diverge.
 
 ## Plugin installation
 
-Run:
+Default Profile:
 
 ```bash
 HERMES_HOME=/var/lib/hermes-studio/.hermes \
@@ -31,9 +38,57 @@ HERMES_BIN=/opt/hermes-agent/venv/bin/hermes \
   bash scripts/install.sh
 ```
 
-This links the plugin below the selected Hermes home and explicitly enables `amazon-ads-control` with Hermes' plugin manager. Plugin discovery alone is not sufficient because user plugins are opt-in.
+Named Profile:
 
-After installation restart the Hermes Studio/Hermes runtime so long-lived sessions reload the plugin.
+```bash
+HERMES_HOME=/var/lib/hermes-studio/.hermes \
+HERMES_PROFILE=amazon-ads \
+HERMES_BIN=/opt/hermes-agent/venv/bin/hermes \
+  bash scripts/install.sh
+```
+
+For the named example the plugin is linked under:
+
+```text
+/var/lib/hermes-studio/.hermes/profiles/amazon-ads/plugins/amazon-ads-control
+```
+
+The installer explicitly enables `amazon-ads-control` with Hermes' PluginManager. Plugin discovery alone is not sufficient because user plugins are opt-in. Restart the Hermes Studio/Hermes runtime after installation so long-lived Agent Bridge sessions reload the plugin.
+
+## Studio integration depth
+
+The integration is intentionally deeper than “the CLI can see a plugin”:
+
+1. Hermes Studio resolves the selected Profile home.
+2. Studio's PluginManager discovers `amazon-ads-control` from that Profile.
+3. Studio chat runs through its Agent Bridge and the `/api/chat-run/runs` HTTP bridge.
+4. Hermes executes the `amazon-ads-control` tools/hooks inside the selected Profile.
+5. The plugin talks only to the local Amazon Ads Control service using the machine token.
+6. The controller applies the sealed policy, budget reservations, CAS/write boundary and independent-verifier requirements.
+7. Amazon MCP/Direct API transports remain below that controller boundary.
+
+Studio therefore does not receive a parallel or privileged mutation path. A chat request and an unattended scheduled request converge on the same control plane and the same safety envelope.
+
+## Upstream Hermes Studio contract gate
+
+CI runs:
+
+```bash
+python scripts/check_hermes_studio_contract.py --check
+```
+
+The checker follows the current `EKKOLearnAI/hermes-studio` `main` branch and fails closed if the integration semantics used by this project disappear or materially move, including:
+
+- default/named Profile directory resolution;
+- selected-Profile `HERMES_HOME` propagation;
+- user-plugin discovery through Hermes `PluginManager`;
+- plugin list/enable routes;
+- `/api/chat-run/runs`;
+- Profile propagation into the chat socket;
+- bearer-token socket auth;
+- tool execution events.
+
+This is a semantic compatibility gate rather than an exact upstream file-hash pin, so harmless source edits do not break the build while structural integration drift does.
 
 ## Credential boundary
 
@@ -42,7 +97,7 @@ Keep these values server-side only:
 - `ADS_CONTROL_AGENT_TOKEN`;
 - Amazon OAuth client secret and refresh/access tokens;
 - Hermes provider credentials;
-- Hermes Studio auth/JWT secrets.
+- Hermes Studio authentication/JWT secrets.
 
 Never inject them into browser JavaScript, public HTML, repository files, screenshots or public logs. The Amazon Ads Control service remains loopback/private behind the authenticated reverse proxy.
 
@@ -68,13 +123,13 @@ The Web owner surface stores:
 - exploration share;
 - per-Campaign daily budget limit.
 
-Before an exposure-increasing action Hermes must perform a fresh Amazon Campaign read for the exact enabled Profile. The controller, not the model, decides whether the projected Campaign-budget exposure fits the hard cap and exploration pool.
+Before an exposure-increasing action Hermes must perform a fresh Amazon Campaign read for the exact enabled Profile. The controller, not the model, decides whether the projected exposure fits the hard cap and exploration pool.
 
 Weak historical evidence may justify a small `HERMES-SP-EXP-*` experiment. It does not authorize bypassing current-state reads, schema validation, atomic execution, independent verification, reversible creation/activation sequencing or the hard budget ceiling.
 
 ## Acceptance
 
-Static/profile check:
+Static/Profile check:
 
 ```bash
 HERMES_HOME=/var/lib/hermes-studio/.hermes \
@@ -83,7 +138,7 @@ HERMES_BIN=/opt/hermes-agent/venv/bin/hermes \
   bash scripts/validate_hermes_studio.sh
 ```
 
-Credentialed end-to-end acceptance (uses one real Hermes model turn and the live local control plane):
+Credentialed Hermes runtime acceptance, using one real model turn and the live local control plane:
 
 ```bash
 HERMES_HOME=/var/lib/hermes-studio/.hermes \
@@ -92,8 +147,21 @@ HERMES_BIN=/opt/hermes-agent/venv/bin/hermes \
   bash scripts/validate_hermes_studio.sh --live
 ```
 
-The repository CI separately loads the plugin through real Hermes PluginManager versions. Production acceptance additionally requires the deployed Hermes Studio profile, local control service, live Amazon MCP/OAuth and target VPS to pass together.
+Full deployed **Hermes Studio Web -> HTTP chat-run -> Agent Bridge -> plugin -> local controller** acceptance:
+
+```bash
+HERMES_HOME=/var/lib/hermes-studio/.hermes \
+HERMES_PROFILE=default \
+HERMES_BIN=/opt/hermes-agent/venv/bin/hermes \
+HERMES_STUDIO_URL=https://YOUR_STUDIO_ORIGIN \
+HERMES_STUDIO_AUTH_TOKEN='SERVER_SIDE_TOKEN' \
+  bash scripts/validate_hermes_studio.sh --studio-live
+```
+
+`--studio-live` never prints the Studio token. It requires the HTTP bridge to complete a real `ads_control_status` tool call and return tool execution evidence.
+
+The repository CI separately loads the plugin through real Hermes PluginManager versions, validates named-Profile layout, and checks the current Hermes Studio upstream contract. Production acceptance additionally requires the deployed Studio Profile, local control service, real model/provider credentials, live Amazon MCP/OAuth and target VPS to pass together.
 
 ## File ownership
 
-`hermes-amazon-ads-us-orchestrator.service` runs as the dedicated `amazonbot` user, not root. Ensure the selected Hermes home and plugin path are readable by that user and that only the minimum runtime directories are writable. Do not solve permission problems by returning the service to root.
+`hermes-amazon-ads-us-orchestrator.service` runs as the dedicated `amazonbot` user, not root. Ensure the selected Hermes base/Profile home and plugin path are readable by that user and that only the minimum runtime directories are writable. Do not solve permission problems by returning the service to root.
