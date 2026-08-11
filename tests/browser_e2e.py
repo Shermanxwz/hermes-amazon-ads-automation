@@ -200,7 +200,7 @@ def main() -> int:
                 page.locator("#max-daily-ad-spend").fill("300")
                 page.locator("#exploration-budget-pct").fill("20")
                 page.locator("#budget-form").get_by_role("button", name="保存", exact=True).click()
-                page.locator("#notice").filter(has_text="每日预算硬上限已更新").wait_for()
+                page.locator("#notice").filter(has_text="每日最大花费硬上限已更新").wait_for()
                 current = store.get_settings()
                 assert current["max_daily_ad_spend"] == 300
                 assert current["exploration_budget_pct"] == 20
