@@ -30,6 +30,8 @@ run_required amazon_postman "Official Unified API GA/Beta separation contract" p
 run_required amazon_postman "Every official capability has an explicit project policy" python3 "$ROOT/scripts/check_project_capability_policy.py" --manifest "$ARTIFACT_DIR/postman-capabilities.json" --policy "$ROOT/official/project-capability-policy.json" --output "$ARTIFACT_DIR/project-capability-policy.json"
 run_required amazon_postman "Official Postman fingerprint drift gate" python3 "$ROOT/scripts/check_official_fingerprint.py" --manifest "$ARTIFACT_DIR/postman-capabilities.json" --baseline "$ROOT/official/postman-semantic-baseline.json"
 run_required amazon_mcp "Official Amazon Ads MCP endpoint reachability" python3 "$ROOT/scripts/check_amazon_mcp_reachability.py"
+run_required hermes_studio "Hermes Studio upstream Profile/plugin/chat-run contract" python3 "$ROOT/scripts/check_hermes_studio_contract.py" --check --output "$ARTIFACT_DIR/hermes-studio-contract.json"
+run_required hermes_studio "Hermes Studio named Profile install/validation layout" bash "$ROOT/tests/hermes_studio_profile_layout.sh"
 run_required recovery "Concurrency, recovery, HTTP and SQLite stress" python3 "$ROOT/tests/stress_recovery.py"
 
 if command -v coverage >/dev/null 2>&1; then run_required quality "Branch coverage gate" bash "$ROOT/scripts/coverage.sh"; else record EXTERNAL quality "Branch coverage gate" "coverage package is not installed"; fi
@@ -45,6 +47,17 @@ if python3 -c 'import hermes_cli' >/dev/null 2>&1; then run_required hermes "Pin
 if [[ "${FULL_SANDBOX_LIVE_MCP:-0}" == "1" ]]; then
   if [[ -n "${AMAZON_ADS_MCP_ACCESS_TOKEN:-}" ]]; then run_required amazon_live "Authenticated live MCP initialize and complete tools/list" python3 "$ROOT/scripts/check_amazon_mcp_contract.py" --check --output "$ARTIFACT_DIR/mcp-live-manifest.json"; else record FAIL amazon_live "Authenticated live MCP initialize and complete tools/list" "FULL_SANDBOX_LIVE_MCP=1 requires AMAZON_ADS_MCP_ACCESS_TOKEN"; fi
 else record EXTERNAL amazon_live "Authenticated live MCP initialize and complete tools/list" "set FULL_SANDBOX_LIVE_MCP=1 with an owner access token"; fi
+
+if [[ "${FULL_SANDBOX_HERMES_STUDIO_LIVE:-0}" == "1" ]]; then
+  if [[ -n "${HERMES_STUDIO_URL:-}" && -n "${HERMES_STUDIO_AUTH_TOKEN:-}" ]]; then
+    run_required hermes_studio_live "Real Hermes Studio HTTP chat-run to ads_control_status" bash "$ROOT/scripts/validate_hermes_studio.sh" --studio-live
+  else
+    record FAIL hermes_studio_live "Real Hermes Studio HTTP chat-run to ads_control_status" "FULL_SANDBOX_HERMES_STUDIO_LIVE=1 requires HERMES_STUDIO_URL and HERMES_STUDIO_AUTH_TOKEN"
+  fi
+else
+  record EXTERNAL hermes_studio_live "Real Hermes Studio HTTP chat-run to ads_control_status" "requires deployed Hermes Studio, auth token, model credentials and local ads control service"
+fi
+
 record EXTERNAL amazon_live "OAuth authorization and refresh rotation" "requires owner Login with Amazon consent"
 record EXTERNAL amazon_live "Real Profiles, currencies and manager relationships" "account-specific evidence"
 record EXTERNAL amazon_live "Real report submit, poll, GZIP download and parsing" "requires Amazon report IDs"
@@ -67,7 +80,7 @@ with source.open(encoding="utf-8") as handle:
     for status, layer, name, detail in csv.reader(handle, delimiter="\t"):
         rows.append({"status": status, "layer": layer, "name": name, "detail": detail})
 counts = Counter(row["status"] for row in rows); layers = defaultdict(Counter)
-for row in rows: layers[row["layer"]][row["status"]] += 1
+for row in rows: layers[row["layer"]][row["status"] += 1
 overall = "FAIL" if counts["FAIL"] else "PASS_WITH_EXTERNAL_ACCEPTANCE" if counts["EXTERNAL"] else "PASS"
 report = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "overall": overall,
           "counts": dict(counts), "layers": {key: dict(value) for key, value in sorted(layers.items())}, "results": rows}
