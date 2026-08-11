@@ -112,6 +112,15 @@ class BudgetGuardV421Tests(unittest.TestCase):
         assert current is not None
         return task, current
 
+    def approve_task(self, task: dict) -> None:
+        approval = self.env.store.create_approval_request(
+            task["id"], "budget-test", "Approve exact budget-test reservation fixture",
+        )
+        self.env.store.approve_approval(
+            approval["id"], "operator", approval["payload_hash"],
+            f"APPROVE {approval['id']} {approval['payload_hash'][:12]}",
+        )
+
     def reserve(self, task: dict, decision: dict, session: str = "exec") -> dict:
         return self.env.store.reserve_decision(
             decision["id"], task["id"], session, 900,
@@ -302,6 +311,8 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.live_read(30)  # worst-case spend exposure = 60
         task1, first = self.attach_task(self.add_campaign_decision(35))
         task2, second = self.attach_task(self.add_campaign_decision(36))
+        self.approve_task(task1)
+        self.approve_task(task2)
         barrier = threading.Barrier(3)
         outcomes: list[tuple[str, str]] = []
         lock = threading.Lock()
@@ -345,6 +356,7 @@ class BudgetGuardV421Tests(unittest.TestCase):
         self.env.store.update_settings({"budget_guard_conservative_pct": 100.0})
         self.live_read(10, next_token="page-2")
         task, decision = self.attach_task(self.add_campaign_decision(5))
+        self.approve_task(task)
         with self.assertRaisesRegex(ValueError, "complete unpaginated"):
             self.reserve(task, decision)
 
