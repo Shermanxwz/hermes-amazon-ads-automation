@@ -31,11 +31,13 @@ class PatchCompositionTests(unittest.TestCase):
             Store.sync_catalog.__module__,
             "amazon_ads_control.regional_mcp",
         )
-        # The authoritative budget check and decision reservation share one
-        # BEGIN IMMEDIATE transaction to prevent concurrent oversubscription.
+        # The compatibility hardening layer is intentionally the outermost
+        # reservation owner. It serializes the financial precheck, then
+        # delegates to the already-sealed approval/CAS/entity-cooldown chain.
+        # The legacy budget extension must never replace that chain again.
         self.assertEqual(
             Store.reserve_decision.__module__,
-            "amazon_ads_control.budget_reservation",
+            "amazon_ads_control.budget_reservation_compat",
         )
 
 
