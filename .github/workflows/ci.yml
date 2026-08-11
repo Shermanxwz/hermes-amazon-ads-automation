@@ -127,6 +127,17 @@ jobs:
           test ! -e .ci-hermes-agent
       - run: PYTHONPATH="$PWD/control-plane" python tests/real_hermes_smoke.py
 
+  hermes-studio-contract:
+    name: Hermes Studio Profile + Agent Bridge contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12"}
+      - run: python scripts/check_hermes_studio_contract.py --check --output /tmp/hermes-studio-contract.json
+      - run: bash tests/hermes_studio_profile_layout.sh
+
   amazon-official-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 10
