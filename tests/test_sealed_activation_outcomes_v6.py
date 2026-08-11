@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from amazon_ads_control.catalog import descriptor_from_payload
-from helpers import Environment, one_target_snapshot
+from helpers import Environment, READ_CAMPAIGN, one_target_snapshot
 
 CREATE_CAMPAIGN = {
     "registered_name": "mcp_amazon_ads_campaign_management_create_campaign",
@@ -35,8 +35,17 @@ class SealedActivationOutcomeV6Tests(unittest.TestCase):
         self.env.store.sync_catalog([
             descriptor_from_payload(CREATE_CAMPAIGN),
             descriptor_from_payload(UPDATE_CAMPAIGN),
+            descriptor_from_payload(READ_CAMPAIGN),
         ])
         self.env.store.update_settings({"mode": "autopilot", "execution_enabled": True})
+        self.env.store.record_action(
+            task_id=None, session_id="initial-budget-read", actor_role="main",
+            phase="after", tool_name=READ_CAMPAIGN["registered_name"],
+            operation="read", allowed=True,
+            args={"body": {"accessRequestedAccount": {"profileId": "p1"}}},
+            success=True, outcome_status="success", structured_result=True,
+            result={"campaigns": []},
+        )
 
     def tearDown(self):
         self.env.close()
