@@ -7,8 +7,10 @@ Keep the deployment in `OBSERVE` until every applicable item has dated evidence.
 - [ ] Dedicated `amazonbot` Linux user, protected server-side environment, HTTPS and private control port.
 - [ ] Database integrity check, transactional/online backup restore and real host reboot recovery pass.
 - [ ] Hermes loads the plugin and all control tools/hooks in the exact production Profile.
-- [ ] Hermes Studio chat, interactive Hermes and the scheduled orchestrator select the same enabled Hermes Profile/Home.
-- [ ] `scripts/validate_hermes_studio.sh --live` passes against the deployed Studio/Hermes runtime and local control plane.
+- [ ] Hermes Studio chat, interactive Hermes and the scheduled orchestrator select the same enabled Hermes base Home/Profile.
+- [ ] `scripts/validate_hermes_studio.sh --live` passes against the production Hermes runtime and local control plane.
+- [ ] `scripts/validate_hermes_studio.sh --studio-live` passes through the deployed Studio `/api/chat-run/runs` -> Agent Bridge -> `ads_control_status` tool path and records tool execution evidence.
+- [ ] A named Profile, if used, resolves to `<base>/profiles/<name>` and the plugin is discovered from that exact Profile rather than silently falling back to default.
 - [ ] Scheduled orchestration has no direct MCP/API token or SQLite mutation path and runs non-root with the declared resource limits.
 - [ ] Main cannot write; one bound Executor writes and a different Session verifies.
 - [ ] Model fallback, heartbeat loss, Outbox overflow or resource failure fails closed.
@@ -70,8 +72,9 @@ Keep the deployment in `OBSERVE` until every applicable item has dated evidence.
 
 ## Release
 
-- [ ] Package, control-plane `__version__`, plugin metadata, manifest, docs, Git tag and GitHub Release all identify the same release.
-- [ ] Final release commit passes all CI jobs including runtime branch coverage >=80%, privacy/security, browser matrix, real Hermes PluginManager versions, deployment/systemd, official contracts, stress/recovery and full-managed sandbox.
+- [ ] Package, control-plane `__version__`, plugin metadata, manifest, docs, Git tag and GitHub Release all identify `4.2.1`.
+- [ ] Final release commit passes all CI jobs including runtime branch coverage >=80%, privacy/security, browser matrix, real Hermes PluginManager versions, Hermes Studio Profile/Agent Bridge contract, deployment/systemd, Amazon official contracts, stress/recovery and full-managed sandbox.
+- [ ] The `v4.2.1` Tag points exactly at the CI-passing current `main` HEAD; an existing mismatched tag must fail closed and must never be force-moved by automation.
 - [ ] No critical alerts or live Schema drift.
 - [ ] Routine, exploration and structural canaries are independently verified in the live Amazon account/Test Account.
 - [ ] The first complete attribution window is reviewed before widening autonomous exposure.
