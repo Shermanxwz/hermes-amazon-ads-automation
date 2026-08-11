@@ -80,7 +80,7 @@ with source.open(encoding="utf-8") as handle:
     for status, layer, name, detail in csv.reader(handle, delimiter="\t"):
         rows.append({"status": status, "layer": layer, "name": name, "detail": detail})
 counts = Counter(row["status"] for row in rows); layers = defaultdict(Counter)
-for row in rows: layers[row["layer"]][row["status"] += 1
+for row in rows: layers[row["layer"]][row["status"]] += 1
 overall = "FAIL" if counts["FAIL"] else "PASS_WITH_EXTERNAL_ACCEPTANCE" if counts["EXTERNAL"] else "PASS"
 report = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "overall": overall,
           "counts": dict(counts), "layers": {key: dict(value) for key, value in sorted(layers.items())}, "results": rows}
