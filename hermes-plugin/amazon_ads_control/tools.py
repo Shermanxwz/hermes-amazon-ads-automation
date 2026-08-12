@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+import json
+from . import client
+
+
+def _session(kwargs):
+    return kwargs.get("session_id") or kwargs.get("task_id") or kwargs.get("turn_id") or ""
+
+
+def sync_catalog(**kwargs):
+    from . import sync_live_catalog
+    return json.dumps(sync_live_catalog(force=True), ensure_ascii=False)
+
+
+def create_report_job(spec, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/reports", {
+        "spec": spec, "actor": "hermes-main",
+    }, timeout=20), ensure_ascii=False)
+
+
+def report_evidence(limit=20, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/report-evidence", {
+        "limit": limit, "session_id": _session(kwargs),
+    }, timeout=15), ensure_ascii=False)
+
+
+def transition_report(report_job_id, status, evidence_action_id=None, data=None, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/reports/transition", {
+        "report_job_id": report_job_id,
+        "status": status,
+        "evidence_action_id": evidence_action_id,
+        "session_id": _session(kwargs),
+        "data": data or {},
+        "actor": "hermes-main",
+    }, timeout=20), ensure_ascii=False)
+
+
+def plan_cycle(snapshot, lineage, policy=None, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/cycles/plan", {
+        "snapshot": snapshot, "lineage": lineage, "policy": policy or {}, "actor": "hermes-main",
+        "parent_session_id": _session(kwargs),
+    }, timeout=30), ensure_ascii=False)
+
+
+def create_task(cycle_id, limit=25, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/tasks", {
+        "cycle_id": cycle_id, "limit": limit, "parent_session_id": _session(kwargs), "actor": "hermes-main",
+    }), ensure_ascii=False)
+
+
+def create_managed_plan(title, profile, actions, objective="", approval_summary="", approval_ttl_minutes=30, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/managed-plans", {
+        "title": title,
+        "profile": profile,
+        "actions": actions,
+        "objective": objective,
+        "approval_summary": approval_summary,
+        "approval_ttl_minutes": approval_ttl_minutes,
+        "parent_session_id": _session(kwargs),
+        "actor": "hermes-main",
+    }, timeout=30), ensure_ascii=False)
+
+
+def request_approval(task_id, summary="", ttl_minutes=30, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/approvals/request", {
+        "task_id": task_id,
+        "summary": summary,
+        "ttl_minutes": ttl_minutes,
+        "actor": "hermes-main",
+        "session_id": _session(kwargs),
+    }, timeout=15), ensure_ascii=False)
+
+
+def status(**kwargs):
+    return json.dumps(client.context(_session(kwargs)), ensure_ascii=False)
+
+
+def record_note(message, task_id=None, level="info", **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/events", {
+        "level": level, "type": "agent.note", "actor": "hermes", "task_id": task_id,
+        "message": message, "data": {"session_id": _session(kwargs)},
+    }), ensure_ascii=False)
+
+
+def prepare_write(decision_id, evidence_action_id, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/prepare-write", {
+        "decision_id": decision_id,
+        "evidence_action_id": evidence_action_id,
+        "session_id": _session(kwargs),
+    }), ensure_ascii=False)
+
+
+def read_evidence(decision_id, limit=20, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/read-evidence", {
+        "decision_id": decision_id, "limit": limit, "session_id": _session(kwargs),
+    }), ensure_ascii=False)
+
+
+def verify_decision(decision_id, evidence_action_id, message="", **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/verify", {
+        "decision_id": decision_id, "evidence_action_id": evidence_action_id, "message": message,
+        "session_id": _session(kwargs),
+    }), ensure_ascii=False)
+
+
+def finalize_task(task_id, summary, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/task-finalize", {
+        "task_id": task_id, "summary": summary, "actor": "hermes-main",
+    }), ensure_ascii=False)
+
+
+def ingest_stream_events(events, **kwargs):
+    return json.dumps(client.request("POST", "/api/agent/stream-events", {"events": events}, timeout=15), ensure_ascii=False)

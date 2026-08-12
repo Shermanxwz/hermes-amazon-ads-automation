@@ -1,0 +1,33 @@
+plugins:
+  enabled:
+    - amazon-ads-control
+
+delegation:
+  provider: custom:new-api-230385
+  model: MiniMax-M3
+  max_concurrent_children: 1
+  max_spawn_depth: 1
+  orchestrator_enabled: false
+  inherit_mcp_toolsets: true
+  subagent_auto_approve: false
+  max_iterations: 35
+
+mcp_servers:
+  amazon-ads:
+    url: ${AMAZON_ADS_MCP_URL}
+    auth: oauth
+    enabled: true
+    connect_timeout: 60
+    timeout: 120
+    supports_parallel_tool_calls: false
+    tools:
+      prompts: false
+      resources: false
+
+cron:
+  enabled: true
+
+approvals:
+  # Avoid Hermes terminal prompts in unattended cycles. The plugin remains the
+  # blocking authority and allows only exact profile-bound SP decisions.
+  cron_mode: allow

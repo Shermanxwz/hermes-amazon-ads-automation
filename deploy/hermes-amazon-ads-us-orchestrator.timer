@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Hermes Amazon Ads US-only orchestrator daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 America/Los_Angeles
+Persistent=true
+RandomizedDelaySec=10m
+Unit=hermes-amazon-ads-us-orchestrator.service
+
+[Install]
+WantedBy=timers.target

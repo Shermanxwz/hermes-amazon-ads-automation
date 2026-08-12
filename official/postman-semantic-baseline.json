@@ -1,0 +1,8 @@
+{
+  "manifest_version": 2,
+  "request_count": 244,
+  "semantic_sha256": "74dbb40863227c656b02f0a22219c1d5a835aca5d7295ce7ad72b430ee1ed9c1",
+  "accepted_at": "2026-08-04T09:06:34Z",
+  "source": "amzn/ads-advanced-tools-docs main Postman collection",
+  "policy": "Any endpoint addition, removal, method/path/header/body semantic change requires an explicit reviewed baseline update."
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Amazon Ads 全托管日循环",
+  "schedule": "30 17 * * *",
+  "skill": "amazon-ads-control:amazon-ads-autopilot",
+  "prompt": "执行 Amazon Ads 每日全托管循环。先检查控制面状态和昨日失败，再读取可用数据、诊断、创建有证据的任务、委派 Executor 执行，再委派不同的只读 Verifier 逐项重新查询并验证，最后输出简明中文日报。控制面不可达或处于 observe/paused 时只读分析，不做任何写操作。",
+  "enabled_toolsets": ["mcp-amazon-ads", "amazon-ads-control", "delegation"],
+  "deliver": "local",
+  "enabled": true
+}

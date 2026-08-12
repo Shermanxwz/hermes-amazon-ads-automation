@@ -1,0 +1,9 @@
+"""Hermes Amazon Ads full-managed, deterministic ACOS control plane."""
+
+from .extension_registry import install_extensions as _install_extensions
+
+__version__ = "4.2.3"
+
+_install_extensions()
+
+del _install_extensions

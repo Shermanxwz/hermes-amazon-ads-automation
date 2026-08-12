@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Hermes Ads Autopilot</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <section id="login" class="login-panel">
+      <div class="brand-mark">H</div>
+      <h1>Hermes Ads Autopilot</h1>
+      <p>广告归因 ACOS 全托管运营</p>
+      <form id="login-form">
+        <label for="password">控制台密码</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="控制台密码" required>
+        <button type="submit">登录</button>
+      </form>
+      <div id="login-error" class="error" aria-live="polite"></div>
+    </section>
+
+    <div hidden aria-hidden="true">确定性策略 独立验证 本页怎么理解 Main 主控 仅观察 报告生命周期 写前必须重新读取并匹配原值 只在同一实体对象内核对全部预期字段</div>
+    <section id="app" hidden>
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">AMAZON ADS · SP</div>
+          <h1>广告全托管</h1>
+          <p id="generated">—</p>
+        </div>
+        <div class="top-actions">
+          <button id="refresh" type="button" class="secondary">刷新</button>
+          <button id="logout" type="button" class="secondary">退出</button>
+        </div>
+      </header>
+
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <section class="hero-grid">
+        <article class="control-panel">
+          <div class="control-heading">
+            <div>
+              <span id="mode-pill" class="status-pill">—</span>
+              <h2 id="mode-title">—</h2>
+              <p id="mode-copy">—</p>
+            </div>
+            <span id="readiness-pill" class="status-pill">—</span>
+          </div>
+          <div class="mode-buttons" aria-label="运行模式">
+            <button type="button" data-mode="autopilot">全托管运行</button>
+            <button type="button" data-mode="observe" class="secondary">仅观察</button>
+            <button type="button" data-mode="paused" class="danger">暂停</button>
+          </div>
+          <form id="strategy-form" class="strategy-form">
+            <label><span>目标 ACOS</span><div class="input-suffix"><input id="target-acos" type="number" min="1" max="500" step="0.1"><b>%</b></div></label>
+            <label><span>单 Campaign 日预算上限</span><div class="input-suffix"><input id="max-campaign-budget" type="number" min="1" step="1"><b id="currency-label">—</b></div></label>
+            <button type="submit">保存</button>
+            <span id="strategy-message" aria-live="polite"></span>
+          </form>
+          <form id="budget-form" class="strategy-form">
+            <label><span>每日最大花费硬上限</span><div class="input-suffix"><input id="max-daily-ad-spend" type="number" min="1" step="1"><b id="daily-currency-label">—</b></div></label>
+            <label><span>AI 探索花费比例</span><div class="input-suffix"><input id="exploration-budget-pct" type="number" min="0" max="100" step="1"><b>%</b></div></label>
+            <button type="submit">保存</button>
+            <span id="budget-message" aria-live="polite"></span>
+          </form>
+        </article>
+        <section id="kpis" class="kpi-grid" aria-label="核心指标"></section>
+      </section>
+
+      <section class="panel orchestrator-panel" aria-label="后台编排器状态">
+        <div class="section-title">
+          <div>
+            <h2>后台编排器</h2>
+            <p>仅运营已绑定的 US Sponsored Products Profile；每日最大花费硬上限是 Owner 唯一日花费授权，内部短时预留不会形成第二个预算</p>
+          </div>
+          <span id="orchestrator-status" class="status-pill">—</span>
+        </div>
+        <div class="orchestrator-grid">
+          <div><span class="muted">当前阶段</span><strong id="orchestrator-stage">—</strong></div>
+          <div><span class="muted">报告队列</span><strong id="orchestrator-reports">—</strong></div>
+          <div><span class="muted">活动任务</span><strong id="orchestrator-tasks">—</strong></div>
+          <div><span class="muted">最近心跳</span><strong id="orchestrator-heartbeat">—</strong></div>
+        </div>
+        <div class="orchestrator-grid">
+          <div><span class="muted">今日广告花费</span><strong id="budget-exposure">—</strong></div>
+          <div><span class="muted">今日可用额度</span><strong id="budget-remaining">—</strong></div>
+          <div><span class="muted">AI 探索可用额度</span><strong id="exploration-remaining">—</strong></div>
+          <div><span class="muted">花费数据状态</span><strong id="budget-guard-state">—</strong></div>
+        </div>
+        <div id="orchestrator-detail" class="orchestrator-detail">等待状态更新</div>
+      </section>
+
+      <section class="panel trend-panel">
+        <div class="section-title"><div><h2>ACOS 趋势</h2><p>最近周期的广告归因表现与目标线</p></div><span id="trend-summary" class="muted">—</span></div>
+        <div id="trend-chart" class="trend-chart" role="img" aria-label="ACOS 趋势图"></div>
+      </section>
+
+      <section class="content-grid">
+        <article class="panel"><div class="section-title"><div><h2>AI 最近操作</h2><p>只展示发生了什么以及为什么</p></div><span id="activity-count" class="count-chip">0</span></div><div id="activity-list" class="feed"></div></article>
+        <article class="panel"><div class="section-title"><div><h2>需要关注</h2><p>正常运行不会打扰你，只有异常才出现</p></div><span id="alert-count" class="count-chip">0</span></div><div id="alert-list" class="feed"></div></article>
+      </section>
+
+      <footer class="health-strip"><span id="execution-health">执行 —</span><span id="catalog-health">MCP —</span><span id="report-health">报告 —</span><span id="storage-health">存储 —</span></footer>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+  <script src="/static/app_v3.js"></script>
+</body>
+</html>

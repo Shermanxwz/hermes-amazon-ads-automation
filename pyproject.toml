@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=77.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-amazon-ads-control"
+version = "4.2.3"
+description = "Ads-only full-managed probabilistic ACOS autopilot with sealed SP autonomy, owner daily spend ceiling and independent verification"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Shermanxwz"}]
+
+[project.scripts]
+amazon-ads-control = "amazon_ads_control.server:main"
+amazon-ads-worker = "amazon_ads_control.worker:main"
+amazon-ads-backtest = "amazon_ads_control.backtest_cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "control-plane"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["control-plane"]
+
+[tool.setuptools.package-data]
+amazon_ads_control = ["static/*"]
